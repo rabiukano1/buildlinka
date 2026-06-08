@@ -14,6 +14,7 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { MaterialIcons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors } from '../constants/Colors';
 
 const { width, height } = Dimensions.get('window');
@@ -100,6 +101,7 @@ function SlideItem({ item, index, scrollX }: { item: Slide; index: number; scrol
 
 export default function OnboardingScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const [page, setPage] = useState(0);
   const pageRef = useRef(0);
   const scrollX = useRef(new Animated.Value(0)).current;
@@ -170,7 +172,7 @@ export default function OnboardingScreen() {
         })}
       />
 
-      <View style={styles.bottomArea}>
+        <View style={[styles.bottomArea, { bottom: 40 + insets.bottom }]}>
         <View style={styles.dotsRow}>
           {SLIDES.map((_, i) => {
             const inputRange = [
@@ -315,7 +317,6 @@ const styles = StyleSheet.create({
   },
   bottomArea: {
     position: 'absolute',
-    bottom: 60,
     left: 32,
     right: 32,
     alignItems: 'center',

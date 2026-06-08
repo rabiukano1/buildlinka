@@ -1,8 +1,12 @@
 import { Tabs } from 'expo-router';
 import { MaterialIcons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors } from '../../constants/Colors';
+import { useCart } from '../../contexts/CartContext';
 
 export default function TabLayout() {
+  const insets = useSafeAreaInsets();
+  const { totalItems } = useCart();
   return (
     <Tabs
       screenOptions={{
@@ -12,9 +16,9 @@ export default function TabLayout() {
           backgroundColor: Colors.card,
           borderTopColor: Colors.outlineVariant,
           borderTopWidth: 1,
-          paddingTop: 8,
-          height: 65,
-          paddingBottom: 10,
+          paddingTop: 12,
+          paddingBottom: insets.bottom > 0 ? insets.bottom : 12,
+          height: 70 + insets.bottom,
         },
         tabBarLabelStyle: {
           fontSize: 12,
@@ -50,6 +54,25 @@ export default function TabLayout() {
           tabBarIcon: ({ color, size }) => (
             <MaterialIcons name="inventory-2" size={size} color={color} />
           ),
+        }}
+      />
+      <Tabs.Screen
+        name="cart-tab"
+        options={{
+          title: 'Cart',
+          headerTitle: 'Cart',
+          tabBarIcon: ({ color, size }) => (
+            <MaterialIcons name="shopping-cart" size={size} color={color} />
+          ),
+          tabBarBadge: totalItems > 0 ? totalItems : undefined,
+          tabBarBadgeStyle: {
+            backgroundColor: Colors.secondary,
+            fontSize: 10,
+            fontWeight: '800',
+            minWidth: 16,
+            height: 16,
+            lineHeight: 16,
+          },
         }}
       />
       <Tabs.Screen

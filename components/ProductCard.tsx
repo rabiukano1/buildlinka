@@ -7,13 +7,16 @@ import type { Product } from '../constants/MockData';
 type Props = {
   product: Product;
   onPress?: () => void;
+  onAddToCart?: () => void;
+  onToggleSave?: () => void;
+  isSaved?: boolean;
   horizontal?: boolean;
 };
 
 const formatPrice = (price: number) =>
   '₦' + price.toLocaleString('en-NG');
 
-export default function ProductCard({ product, onPress, horizontal }: Props) {
+export default function ProductCard({ product, onPress, onAddToCart, onToggleSave, isSaved, horizontal }: Props) {
   if (horizontal) {
     return (
       <TouchableOpacity style={styles.hCard} onPress={onPress} activeOpacity={0.8}>
@@ -42,8 +45,9 @@ export default function ProductCard({ product, onPress, horizontal }: Props) {
                 <MaterialIcons name="star" size={12} color={Colors.amber} />
                 <Text style={styles.ratingText}>{product.rating}</Text>
               </View>
-              <TouchableOpacity style={styles.addBtn}>
-                <MaterialIcons name="shopping-cart" size={15} color={Colors.textWhite} />
+              <TouchableOpacity style={styles.addBtn} onPress={onAddToCart} activeOpacity={0.7}>
+                <MaterialIcons name="shopping-cart" size={14} color="#fff" />
+                <Text style={styles.addBtnText}>Add</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -65,6 +69,11 @@ export default function ProductCard({ product, onPress, horizontal }: Props) {
           <View style={[styles.badgeAbs, product.badge === 'Best Seller' && styles.badgeOrange]}>
             <Text style={styles.badgeText}>{product.badge}</Text>
           </View>
+        )}
+        {onToggleSave && (
+          <TouchableOpacity style={styles.saveBtn} onPress={onToggleSave} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+            <MaterialIcons name={isSaved ? 'bookmark' : 'bookmark-border'} size={18} color={isSaved ? Colors.primaryOrange : Colors.textLight} />
+          </TouchableOpacity>
         )}
       </View>
       <View style={styles.info}>
@@ -164,9 +173,18 @@ const styles = StyleSheet.create({
   hUnit: { fontSize: 10, color: Colors.textLight },
   hRight: { alignItems: 'flex-end', gap: 6 },
   addBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
     backgroundColor: Colors.secondary,
-    borderRadius: 99, // Pill shaped as per DESIGN.md
-    padding: 8,
+    borderRadius: 99,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  addBtnText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#fff',
   },
 
   /* Shared */
@@ -180,6 +198,14 @@ const styles = StyleSheet.create({
   },
   badgeOrange: { backgroundColor: Colors.secondary },
   badgeText: { color: '#fff', fontSize: 9.5, fontWeight: '700' },
+  saveBtn: {
+    position: 'absolute',
+    top: 6,
+    right: 6,
+    backgroundColor: 'rgba(255,255,255,0.9)',
+    borderRadius: 99,
+    padding: 4,
+  },
   ratingRow: { flexDirection: 'row', alignItems: 'center', gap: 2 },
   ratingText: { fontSize: 11, fontWeight: '700', color: Colors.textMedium },
 });

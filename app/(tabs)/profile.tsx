@@ -9,6 +9,7 @@ import {
   Animated,
   ActivityIndicator,
 } from 'react-native';
+import { useRouter } from 'expo-router';
 import { MaterialIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Image } from 'expo-image';
@@ -43,12 +44,7 @@ const MENU_SECTIONS: { title: string; items: MenuItem[] }[] = [
   {
     title: 'Settings',
     items: [
-      { icon: 'person', label: 'Edit Profile', color: Colors.primaryGreen },
-      { icon: 'notifications', label: 'Notifications', color: Colors.primaryOrange, badge: '3' },
-      { icon: 'language', label: 'Language', color: Colors.info },
-      { icon: 'location-on', label: 'Saved Locations', color: '#6A1B9A' },
-      { icon: 'shield', label: 'Privacy & Security', color: Colors.textMuted },
-      { icon: 'info', label: 'About BuildLinka', color: Colors.textMuted },
+      { icon: 'settings', label: 'Settings', color: Colors.textMuted },
     ],
   },
 ];
@@ -81,6 +77,7 @@ function FadeInSection({ children, delay = 0 }: { children: React.ReactNode; del
 }
 
 export default function ProfileScreen() {
+  const router = useRouter();
   const [refreshing, setRefreshing] = useState(false);
   const [avatarUri, setAvatarUri] = useState<string | null>(null);
   const { pickAvatar } = useMediaPicker();
@@ -153,10 +150,14 @@ export default function ProfileScreen() {
             { number: '8', label: 'Reviews', color: Colors.amber },
             { number: '4.9', label: 'Rating', color: Colors.primaryGreen },
           ].map((stat, i) => (
-            <View key={stat.label} style={styles.statItem}>
+            <TouchableOpacity
+              key={stat.label}
+              style={styles.statItem}
+              onPress={() => stat.label === 'Orders' ? router.push('/orders') : undefined}
+            >
               <Text style={[styles.statNumber, { color: stat.color }]}>{stat.number}</Text>
               <Text style={styles.statLabel}>{stat.label}</Text>
-            </View>
+            </TouchableOpacity>
           ))}
         </View>
       </FadeInSection>
@@ -217,6 +218,23 @@ export default function ProfileScreen() {
                   key={item.label}
                   style={[styles.menuItem, index < section.items.length - 1 && styles.menuItemBorder]}
                   activeOpacity={0.6}
+                  onPress={() => {
+                    if (item.label === 'My Orders') {
+                      router.push('/orders');
+                    } else if (item.label === 'Order History') {
+                      router.push('/order-history');
+                    } else if (item.label === 'Saved Items') {
+                      router.push('/saved');
+                    } else if (item.label === 'My Listings') {
+                      router.push('/my-listings');
+                    } else if (item.label === 'Add New Listing') {
+                      router.push('/add-listing');
+                    } else if (item.label === 'My Reviews') {
+                      router.push('/my-reviews');
+                    } else if (item.label === 'Settings') {
+                      router.push('/settings');
+                    }
+                  }}
                 >
                   <View style={[styles.menuIconBox, { backgroundColor: item.color + '18' }]}>
                     <MaterialIcons name={item.icon as any} size={20} color={item.color} />

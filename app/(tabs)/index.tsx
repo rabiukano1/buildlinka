@@ -22,6 +22,8 @@ import {
   type Worker,
   type Vendor,
 } from '../../constants/MockData';
+import { useCart } from '../../contexts/CartContext';
+import { useSaved } from '../../contexts/SavedItemsContext';
 import SearchBar from '../../components/SearchBar';
 import CategoryCard from '../../components/CategoryCard';
 import ProductCard from '../../components/ProductCard';
@@ -103,6 +105,8 @@ function WorkerMiniCard({ worker }: { worker: Worker }) {
 
 export default function HomeScreen() {
   const router = useRouter();
+  const { addItem } = useCart();
+  const { isSaved, toggleSave } = useSaved();
   const [refreshing, setRefreshing] = useState(false);
   const [showAllCats, setShowAllCats] = useState(false);
 
@@ -193,7 +197,29 @@ export default function HomeScreen() {
             <SectionHeader title="Categories" action={showAllCats ? 'Show Less' : `+${CATEGORIES.length - VISIBLE_CATEGORIES} More`} />
             <View style={styles.categoryGrid}>
               {displayedCategories.map((cat) => (
-                <CategoryCard key={cat.id} category={cat} />
+                <CategoryCard
+                  key={cat.id}
+                  category={cat}
+                  onPress={() => {
+                    if (cat.name === 'Cement') { router.push('/category/cement'); }
+                    else if (cat.name === 'Steel & Iron') { router.push('/category/steel-iron'); }
+                    else if (cat.name === 'Roofing') { router.push('/category/roofing'); }
+                    else if (cat.name === 'Electrical') { router.push('/category/electrical'); }
+                    else if (cat.name === 'Plumbing') { router.push('/category/plumbing'); }
+                    else if (cat.name === 'Tiles') { router.push('/category/tiles'); }
+                    else if (cat.name === 'Timber') { router.push('/category/timber'); }
+                    else if (cat.name === 'Equipment') { router.push('/category/equipment'); }
+                    else if (cat.name === 'Glass') { router.push('/category/glass'); }
+                    else if (cat.name === 'Paint') { router.push('/category/paint'); }
+                    else if (cat.name === 'Blocks') { router.push('/category/blocks'); }
+                    else {
+                      router.push({
+                        pathname: '/(tabs)/materials',
+                        params: { category: cat.name },
+                      });
+                    }
+                  }}
+                />
               ))}
             </View>
             <TouchableOpacity
@@ -235,6 +261,9 @@ export default function HomeScreen() {
                   key={p.id}
                   product={p}
                   onPress={() => handleProductPress(p)}
+                  onAddToCart={() => addItem(p)}
+                  onToggleSave={() => toggleSave(p)}
+                  isSaved={isSaved(p.id)}
                 />
               ))}
             </ScrollView>

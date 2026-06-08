@@ -13,6 +13,8 @@ import { useRouter } from 'expo-router';
 import { MaterialIcons } from '@expo/vector-icons';
 import { Colors } from '../../constants/Colors';
 import { CATEGORIES, PRODUCTS, type Product } from '../../constants/MockData';
+import { useCart } from '../../contexts/CartContext';
+import { useSaved } from '../../contexts/SavedItemsContext';
 import SearchBar from '../../components/SearchBar';
 import ProductCard from '../../components/ProductCard';
 
@@ -25,7 +27,7 @@ const SORT_OPTIONS = ['Popular', 'Price: Low', 'Price: High', 'Rating'] as const
 const formatPrice = (price: number) => '₦' + price.toLocaleString('en-NG');
 const formatCount = (n: number) => (n >= 1000 ? (n / 1000).toFixed(1) + 'k' : String(n));
 
-function GridCard({ product, onPress }: { product: Product; onPress?: () => void }) {
+function GridCard({ product, onPress, onAddToCart, onToggleSave, isSaved }: { product: Product; onPress?: () => void; onAddToCart?: () => void; onToggleSave?: () => void; isSaved?: boolean }) {
   return (
     <TouchableOpacity style={styles.gridCard} onPress={onPress} activeOpacity={0.85}>
       <View style={styles.gridImageBox}>
@@ -40,6 +42,11 @@ function GridCard({ product, onPress }: { product: Product; onPress?: () => void
             <Text style={styles.gridOutOfStockText}>Out of Stock</Text>
           </View>
         )}
+        {onToggleSave && (
+          <TouchableOpacity style={styles.gridSaveBtn} onPress={onToggleSave} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+            <MaterialIcons name={isSaved ? 'bookmark' : 'bookmark-border'} size={16} color={isSaved ? Colors.primaryOrange : Colors.textLight} />
+          </TouchableOpacity>
+        )}
       </View>
       <View style={styles.gridInfo}>
         <Text style={styles.gridName} numberOfLines={2}>{product.name}</Text>
@@ -53,7 +60,7 @@ function GridCard({ product, onPress }: { product: Product; onPress?: () => void
             <MaterialIcons name="star" size={11} color={Colors.amber} />
             <Text style={styles.gridRatingText}>{product.rating}</Text>
           </View>
-          <TouchableOpacity style={styles.gridCartBtn}>
+          <TouchableOpacity style={styles.gridCartBtn} onPress={onAddToCart}>
             <MaterialIcons name="shopping-cart" size={14} color="#fff" />
           </TouchableOpacity>
         </View>
@@ -64,6 +71,8 @@ function GridCard({ product, onPress }: { product: Product; onPress?: () => void
 
 export default function MaterialsScreen() {
   const router = useRouter();
+  const { addItem } = useCart();
+  const { isSaved, toggleSave } = useSaved();
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [selectedSort, setSelectedSort] = useState<string>('Popular');
@@ -135,7 +144,13 @@ export default function MaterialsScreen() {
     if (viewMode === 'grid') {
       return (
         <View style={styles.gridCell}>
-          <GridCard product={item} onPress={() => router.push(`/product/${item.id}`)} />
+          <GridCard
+            product={item}
+            onPress={() => router.push(`/product/${item.id}`)}
+            onAddToCart={() => addItem(item)}
+            onToggleSave={() => toggleSave(item)}
+            isSaved={isSaved(item.id)}
+          />
         </View>
       );
     }
@@ -144,6 +159,9 @@ export default function MaterialsScreen() {
         product={item}
         horizontal
         onPress={() => router.push(`/product/${item.id}`)}
+        onAddToCart={() => addItem(item)}
+        onToggleSave={() => toggleSave(item)}
+        isSaved={isSaved(item.id)}
       />
     );
   };
@@ -194,7 +212,20 @@ export default function MaterialsScreen() {
           renderItem={({ item }) => (
             <TouchableOpacity
               style={[styles.stripChip, selectedCategory === item && styles.stripChipActive]}
-              onPress={() => setSelectedCategory(item)}
+              onPress={() => {
+                if (item === 'Cement') { router.push('/category/cement'); }
+                else if (item === 'Steel & Iron') { router.push('/category/steel-iron'); }
+                else if (item === 'Roofing') { router.push('/category/roofing'); }
+                else if (item === 'Electrical') { router.push('/category/electrical'); }
+                else if (item === 'Plumbing') { router.push('/category/plumbing'); }
+                else if (item === 'Tiles') { router.push('/category/tiles'); }
+                else if (item === 'Timber') { router.push('/category/timber'); }
+                else if (item === 'Equipment') { router.push('/category/equipment'); }
+                else if (item === 'Glass') { router.push('/category/glass'); }
+                else if (item === 'Paint') { router.push('/category/paint'); }
+                else if (item === 'Blocks') { router.push('/category/blocks'); }
+                else { setSelectedCategory(item); }
+              }}
             >
               <Text
                 style={[
@@ -495,6 +526,14 @@ const styles = StyleSheet.create({
   },
   gridBadgeOrange: { backgroundColor: Colors.primaryOrange },
   gridBadgeText: { color: '#fff', fontSize: 9, fontWeight: '700' },
+  gridSaveBtn: {
+    position: 'absolute',
+    top: 6,
+    right: 6,
+    backgroundColor: 'rgba(255,255,255,0.9)',
+    borderRadius: 99,
+    padding: 4,
+  },
   gridOutOfStock: {
     ...StyleSheet.absoluteFill,
     backgroundColor: '#00000050',

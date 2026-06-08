@@ -3,8 +3,10 @@ import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Alert, RefreshCon
 import { useLocalSearchParams, Stack, useRouter } from 'expo-router';
 import { MaterialIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors } from '../../constants/Colors';
 import { PRODUCTS } from '../../constants/MockData';
+import { useCart } from '../../contexts/CartContext';
 import { MediaViewer } from '../../components/MediaViewer';
 
 const formatPrice = (price: number) => '₦' + price.toLocaleString('en-NG');
@@ -14,6 +16,8 @@ const SIMILAR_PRODUCTS = PRODUCTS.filter((p) => p.badge).slice(0, 3);
 export default function ProductDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
+  const insets = useSafeAreaInsets();
+  const { addItem } = useCart();
   const [qty, setQty] = useState(1);
   const [refreshing, setRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState<'description' | 'reviews' | 'shipping'>('description');
@@ -38,6 +42,7 @@ export default function ProductDetailScreen() {
   }
 
   const handleAddToCart = () => {
+    addItem(product, qty);
     Alert.alert('Added to Cart', `${qty} × ${product.name} added to your cart.`);
   };
 
@@ -228,7 +233,7 @@ export default function ProductDetailScreen() {
         </ScrollView>
 
         {/* ─── Bottom action bar ─── */}
-        <View style={styles.actionBar}>
+        <View style={[styles.actionBar, { paddingBottom: Math.max(insets.bottom, 12) }]}>
           <TouchableOpacity style={styles.wishlistBtn}>
             <MaterialIcons name="favorite-border" size={22} color={Colors.textMuted} />
           </TouchableOpacity>
