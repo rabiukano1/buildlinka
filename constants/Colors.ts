@@ -1,41 +1,59 @@
 export const Colors = {
-  // Primary Greens
-  primaryGreen: '#2E7D32',
-  lightGreen: '#4CAF50',
-  darkGreen: '#1B5E20',
-  mutedGreen: '#388E3C',
-  greenTint: '#E8F5E9',
+  // Brand Colors (MD3 Mapping)
+  primary: '#0d631b',
+  onPrimary: '#ffffff',
+  primaryContainer: '#2e7d32',
+  onPrimaryContainer: '#cbffc2',
+  
+  secondary: '#a83900',
+  onSecondary: '#ffffff',
+  secondaryContainer: '#fc6018',
+  onSecondaryContainer: '#531800',
+  
+  tertiary: '#6d5100',
+  onTertiary: '#ffffff',
+  tertiaryContainer: '#8c6800',
+  onTertiaryContainer: '#ffefd6',
 
-  // Primary Oranges
-  primaryOrange: '#E65100',
-  lightOrange: '#FF8F00',
-  deepOrange: '#BF360C',
-  orangeTint: '#FFF3E0',
+  // Surfaces & Backgrounds
+  background: '#fcf9f8',
+  surface: '#fcf9f8',
+  surfaceVariant: '#e5e2e1',
+  onSurface: '#1b1c1c',
+  onSurfaceVariant: '#40493d',
+  
+  outline: '#707a6c',
+  outlineVariant: '#bfcaba',
+  
+  // Legacy mappings for compatibility
+  primaryGreen: '#0d631b',
+  lightGreen: '#2e7d32',
+  darkGreen: '#002204',
+  greenTint: '#cbffc2',
 
-  // Accent
-  amber: '#FFC107',
-  amberLight: '#FFE082',
+  primaryOrange: '#a83900',
+  orangeTint: '#ffdbcf',
 
-  // Neutrals
-  background: '#F5F5F5',
-  card: '#FFFFFF',
-  border: '#E0E0E0',
-  divider: '#EEEEEE',
+  amber: '#6d5100',
+  amberLight: '#ffdf9e',
 
-  // Text
-  textDark: '#212121',
-  textMedium: '#424242',
-  textLight: '#757575',
-  textMuted: '#9E9E9E',
-  textWhite: '#FFFFFF',
+  card: '#ffffff',
+  border: '#bfcaba',
+  divider: '#e5e2e1',
+
+  textDark: '#1b1c1c',
+  textMedium: '#40493d',
+  textLight: '#707a6c',
+  textMuted: '#bfcaba',
+  textWhite: '#ffffff',
 
   // Status
-  success: '#388E3C',
-  warning: '#F57C00',
-  error: '#C62828',
-  info: '#1565C0',
+  success: '#0d631b',
+  warning: '#6d5100',
+  error: '#ba1a1a',
+  info: '#0d631b',
 
   // Tab bar
-  tabActive: '#2E7D32',
-  tabInactive: '#9E9E9E',
+  tabActive: '#0d631b',
+  tabInactive: '#707a6c',
 };

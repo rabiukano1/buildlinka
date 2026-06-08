@@ -164,7 +164,7 @@ export default function ProfileScreen() {
       {/* ─── Referral card ─── */}
       <FadeInSection delay={160}>
         <LinearGradient
-          colors={[Colors.primaryOrange, '#BF360C']}
+          colors={[Colors.secondary, Colors.secondaryContainer]}
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 1 }}
           style={styles.referralCard}
@@ -175,7 +175,7 @@ export default function ProfileScreen() {
               <Text style={styles.referralSub}>Get ₦2,000 off your next order</Text>
             </View>
             <TouchableOpacity style={styles.referralBtn}>
-              <MaterialIcons name="share" size={16} color={Colors.primaryOrange} />
+              <MaterialIcons name="share" size={16} color={Colors.secondary} />
               <Text style={styles.referralBtnText}>Share</Text>
             </TouchableOpacity>
           </View>
@@ -271,7 +271,7 @@ const styles = StyleSheet.create({
   settingsBtn: {
     width: 36,
     height: 36,
-    borderRadius: 12,
+    borderRadius: 8,
     backgroundColor: 'rgba(255,255,255,0.12)',
     alignItems: 'center',
     justifyContent: 'center',
@@ -287,7 +287,7 @@ const styles = StyleSheet.create({
   avatar: {
     width: 84,
     height: 84,
-    borderRadius: 26,
+    borderRadius: 8,
     backgroundColor: 'rgba(255,255,255,0.2)',
     alignItems: 'center',
     justifyContent: 'center',
@@ -350,9 +350,12 @@ const styles = StyleSheet.create({
     marginHorizontal: 20,
     marginTop: -18,
     backgroundColor: Colors.card,
-    borderRadius: 18,
+    borderRadius: 8,
     padding: 16,
-    boxShadow: '0px 2px 8px 0px rgba(0,0,0,0.07)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
     elevation: 4,
     zIndex: 10,
   },
@@ -375,9 +378,12 @@ const styles = StyleSheet.create({
   referralCard: {
     marginHorizontal: 20,
     marginTop: 16,
-    borderRadius: 18,
+    borderRadius: 8,
     overflow: 'hidden',
-    boxShadow: '0px 3px 10px 0px rgba(230,81,0,0.25)',
+    shadowColor: Colors.secondary,
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.2,
+    shadowRadius: 6,
     elevation: 5,
   },
   referralContent: {
@@ -403,7 +409,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 6,
     backgroundColor: '#fff',
-    borderRadius: 12,
+    borderRadius: 99,
     paddingHorizontal: 16,
     paddingVertical: 10,
   },
@@ -431,9 +437,12 @@ const styles = StyleSheet.create({
   /* ─── Activity ─── */
   activityCard: {
     backgroundColor: Colors.card,
-    borderRadius: 16,
+    borderRadius: 8,
     overflow: 'hidden',
-    boxShadow: '0px 2px 6px 0px rgba(0,0,0,0.06)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
     elevation: 3,
   },
   activityRow: {
@@ -471,9 +480,12 @@ const styles = StyleSheet.create({
   /* ─── Menu ─── */
   menuCard: {
     backgroundColor: Colors.card,
-    borderRadius: 16,
+    borderRadius: 8,
     overflow: 'hidden',
-    boxShadow: '0px 2px 6px 0px rgba(0,0,0,0.06)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
     elevation: 3,
   },
   menuItem: {
@@ -529,7 +541,7 @@ const styles = StyleSheet.create({
     marginHorizontal: 20,
     marginTop: 24,
     paddingVertical: 15,
-    borderRadius: 16,
+    borderRadius: 99,
     backgroundColor: Colors.card,
     borderWidth: 1,
     borderColor: Colors.error + '25',

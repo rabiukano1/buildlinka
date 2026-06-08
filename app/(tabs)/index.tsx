@@ -159,7 +159,7 @@ export default function HomeScreen() {
         <FadeInSection delay={160}>
           <TouchableOpacity activeOpacity={0.92} style={styles.heroCard}>
             <LinearGradient
-              colors={['#2E7D32', '#1B5E20']}
+              colors={[Colors.primary, Colors.primaryContainer]}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 1 }}
               style={styles.heroGradient}
@@ -174,7 +174,7 @@ export default function HomeScreen() {
                 </Text>
                 <View style={styles.heroActions}>
                   <View style={styles.heroBtn}>
-                    <MaterialIcons name="shopping-bag" size={16} color="#1B5E20" />
+                    <MaterialIcons name="shopping-bag" size={16} color="#ffffff" />
                     <Text style={styles.heroBtnText}>Shop Now</Text>
                   </View>
                   <View style={styles.heroBtnSecondary}>
@@ -358,9 +358,12 @@ const styles = StyleSheet.create({
   heroCard: {
     marginHorizontal: 20,
     marginTop: 6,
-    borderRadius: 20,
+    borderRadius: 8,
     overflow: 'hidden',
-    boxShadow: '0px 6px 16px 0px rgba(46,125,50,0.25)',
+    shadowColor: Colors.primary,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
     elevation: 6,
   },
   heroGradient: {
@@ -376,8 +379,8 @@ const styles = StyleSheet.create({
   },
   heroTag: {
     backgroundColor: 'rgba(255,255,255,0.2)',
-    borderRadius: 8,
-    paddingHorizontal: 10,
+    borderRadius: 99,
+    paddingHorizontal: 12,
     paddingVertical: 4,
     alignSelf: 'flex-start',
   },
@@ -406,18 +409,18 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    backgroundColor: Colors.amber,
-    borderRadius: 10,
+    backgroundColor: Colors.secondary,
+    borderRadius: 99,
     paddingHorizontal: 16,
     paddingVertical: 9,
   },
   heroBtnText: {
     fontSize: 13,
     fontWeight: '800',
-    color: '#1B5E20',
+    color: '#ffffff',
   },
   heroBtnSecondary: {
-    borderRadius: 10,
+    borderRadius: 99,
     paddingHorizontal: 14,
     paddingVertical: 9,
     borderWidth: 1.5,
@@ -502,18 +505,23 @@ const styles = StyleSheet.create({
   miniVendor: {
     width: 100,
     backgroundColor: Colors.card,
-    borderRadius: 16,
+    borderRadius: 8,
     padding: 12,
     alignItems: 'center',
     gap: 6,
-    boxShadow: '0px 2px 6px 0px rgba(0,0,0,0.06)',
+    borderLeftWidth: 3,
+    borderLeftColor: Colors.primary,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
     elevation: 2,
   },
   miniVendorEmojiBox: {
     width: 42,
     height: 42,
-    borderRadius: 14,
-    backgroundColor: Colors.greenTint,
+    borderRadius: 8,
+    backgroundColor: Colors.surfaceVariant,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -543,22 +551,27 @@ const styles = StyleSheet.create({
   workerMini: {
     width: 136,
     backgroundColor: Colors.card,
-    borderRadius: 18,
+    borderRadius: 8,
     padding: 14,
     alignItems: 'center',
     gap: 4,
-    boxShadow: '0px 2px 8px 0px rgba(0,0,0,0.07)',
-    elevation: 3,
+    borderLeftWidth: 3,
+    borderLeftColor: Colors.primary,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
   },
   workerMiniAvatar: {
     width: 52,
     height: 52,
-    borderRadius: 16,
-    backgroundColor: Colors.greenTint,
+    borderRadius: 8,
+    backgroundColor: Colors.surfaceVariant,
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 2,
-    borderColor: Colors.primaryGreen + '30',
+    borderWidth: 1,
+    borderColor: Colors.outlineVariant,
   },
   workerMiniAvatarBusy: {
     borderColor: Colors.border,
@@ -604,10 +617,10 @@ const styles = StyleSheet.create({
   },
   workerMiniHire: {
     marginTop: 4,
-    backgroundColor: Colors.primaryGreen,
-    borderRadius: 8,
+    backgroundColor: Colors.secondary,
+    borderRadius: 99,
     paddingHorizontal: 18,
-    paddingVertical: 5,
+    paddingVertical: 6,
     width: '100%',
     alignItems: 'center',
   },

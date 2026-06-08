@@ -35,7 +35,7 @@ const SLIDES: Slide[] = [
     subtitle: 'Source smarter. Build stronger.',
     description:
       'Browse thousands of construction materials from verified vendors across Nigeria. Quality guaranteed, prices you can trust.',
-    gradient: ['#1B5E20', '#2E7D32', '#388E3C'],
+    gradient: [Colors.primary, Colors.primaryContainer, Colors.primary] as [string, string, string],
   },
   {
     id: '2',
@@ -44,7 +44,7 @@ const SLIDES: Slide[] = [
     subtitle: 'Hire with confidence.',
     description:
       'Connect with vetted masons, electricians, plumbers, and carpenters. View reviews, compare rates, and start your project.',
-    gradient: ['#BF360C', '#E65100', '#F57C00'],
+    gradient: [Colors.secondary, Colors.secondaryContainer, Colors.secondary] as [string, string, string],
   },
   {
     id: '3',
@@ -53,7 +53,7 @@ const SLIDES: Slide[] = [
     subtitle: 'Join 10,000+ builders nationwide.',
     description:
       'One app for materials, workers, equipment — everything you need to bring your vision to life.',
-    gradient: ['#004D40', '#2E7D32', '#388E3C'],
+    gradient: [Colors.primary, Colors.primaryContainer, Colors.tertiary] as [string, string, string],
   },
 ];
 
@@ -216,7 +216,7 @@ export default function OnboardingScreen() {
             onPress={handleGetStarted}
           >
             <Text style={styles.getStartedText}>Get Started</Text>
-            <MaterialIcons name="arrow-forward" size={20} color="#1B5E20" />
+            <MaterialIcons name="arrow-forward" size={20} color="#ffffff" />
           </TouchableOpacity>
         ) : (
           <TouchableOpacity
@@ -244,7 +244,7 @@ const styles = StyleSheet.create({
     zIndex: 10,
     paddingHorizontal: 16,
     paddingVertical: 8,
-    borderRadius: 20,
+    borderRadius: 99,
     backgroundColor: 'rgba(255,255,255,0.15)',
   },
   skipText: {
@@ -301,7 +301,7 @@ const styles = StyleSheet.create({
   subtitle: {
     fontSize: 15,
     fontWeight: '600',
-    color: Colors.amber,
+    color: Colors.amberLight,
     textAlign: 'center',
     letterSpacing: 0.3,
   },
@@ -336,17 +336,20 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
-    backgroundColor: Colors.amber,
-    borderRadius: 18,
+    backgroundColor: Colors.secondary,
+    borderRadius: 99,
     paddingVertical: 17,
     width: '100%',
-    boxShadow: '0px 4px 12px 0px rgba(0,0,0,0.25)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
     elevation: 6,
   },
   getStartedText: {
     fontSize: 17,
     fontWeight: '800',
-    color: '#1B5E20',
+    color: '#ffffff',
   },
   nextBtn: {
     flexDirection: 'row',
@@ -354,7 +357,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 8,
     backgroundColor: 'rgba(255,255,255,0.15)',
-    borderRadius: 18,
+    borderRadius: 99,
     paddingVertical: 17,
     width: '100%',
     borderWidth: 1.5,

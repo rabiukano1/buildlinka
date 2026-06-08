@@ -1,4 +1,5 @@
 import { Stack } from 'expo-router';
+import { Colors } from '../constants/Colors';
 
 export default function RootLayout() {
   return (
@@ -11,7 +12,7 @@ export default function RootLayout() {
           headerShown: true,
           headerTitle: 'Product Details',
           headerBackTitle: 'Back',
-          headerTintColor: '#2E7D32',
+          headerTintColor: Colors.primary,
         }}
       />
     </Stack>

@@ -49,18 +49,18 @@ export type Vendor = {
 };
 
 export const CATEGORIES: Category[] = [
-  { id: '1', name: 'Cement', icon: 'layers', color: '#607D8B', count: 124 },
-  { id: '2', name: 'Steel & Iron', icon: 'build', color: '#455A64', count: 87 },
-  { id: '3', name: 'Roofing', icon: 'home', color: '#E65100', count: 96 },
-  { id: '4', name: 'Electrical', icon: 'flash-on', color: '#F9A825', count: 143 },
-  { id: '5', name: 'Plumbing', icon: 'water', color: '#1565C0', count: 78 },
-  { id: '6', name: 'Tiles', icon: 'grid-on', color: '#6A1B9A', count: 203 },
-  { id: '7', name: 'Timber', icon: 'forest', color: '#4E342E', count: 65 },
-  { id: '8', name: 'Equipment', icon: 'precision-manufacturing', color: '#2E7D32', count: 55 },
-  { id: '9', name: 'Glass', icon: 'window', color: '#00838F', count: 42 },
-  { id: '10', name: 'Paint', icon: 'color-lens', color: '#AD1457', count: 189 },
-  { id: '11', name: 'Blocks', icon: 'view-module', color: '#BF360C', count: 71 },
-  { id: '12', name: 'More', icon: 'more-horiz', color: '#388E3C', count: 500 },
+  { id: '1', name: 'Cement', icon: 'layers', color: '#0d631b', count: 124 },
+  { id: '2', name: 'Steel & Iron', icon: 'build', color: '#707a6c', count: 87 },
+  { id: '3', name: 'Roofing', icon: 'home', color: '#a83900', count: 96 },
+  { id: '4', name: 'Electrical', icon: 'flash-on', color: '#6d5100', count: 143 },
+  { id: '5', name: 'Plumbing', icon: 'water', color: '#0d631b', count: 78 },
+  { id: '6', name: 'Tiles', icon: 'grid-on', color: '#707a6c', count: 203 },
+  { id: '7', name: 'Timber', icon: 'forest', color: '#6d5100', count: 65 },
+  { id: '8', name: 'Equipment', icon: 'precision-manufacturing', color: '#0d631b', count: 55 },
+  { id: '9', name: 'Glass', icon: 'window', color: '#707a6c', count: 42 },
+  { id: '10', name: 'Paint', icon: 'color-lens', color: '#a83900', count: 189 },
+  { id: '11', name: 'Blocks', icon: 'view-module', color: '#6d5100', count: 71 },
+  { id: '12', name: 'More', icon: 'more-horiz', color: '#0d631b', count: 500 },
 ];
 
 export const PRODUCTS: Product[] = [
