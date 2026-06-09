@@ -37,6 +37,14 @@
       "expo-image",
       "expo-video",
       [
+        "expo-build-properties",
+        {
+          "android": {
+            "windowSoftInputMode": "adjustResize"
+          }
+        }
+      ],
+      [
         "expo-camera",
         {
           "cameraPermission": "Allow BuildLinka to access your camera",

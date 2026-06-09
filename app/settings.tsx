@@ -1,8 +1,23 @@
-import { useState } from 'react';
-import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Switch, Alert } from 'react-native';
+import { useState, useRef, useEffect } from 'react';
+import {
+  View,
+  Text,
+  ScrollView,
+  StyleSheet,
+  TouchableOpacity,
+  Switch,
+  Alert,
+  Modal,
+  Animated,
+  Dimensions,
+} from 'react-native';
 import { Stack, useRouter } from 'expo-router';
 import { MaterialIcons } from '@expo/vector-icons';
 import { Colors } from '../constants/Colors';
+import { useNotifications } from '../contexts/NotificationContext';
+
+const { width } = Dimensions.get('window');
+const ADMIN_PIN = '1234';
 
 type SettingItem = {
   icon: string;
@@ -24,7 +39,7 @@ const SETTINGS_SECTIONS: { title: string; items: SettingItem[] }[] = [
   {
     title: 'Preferences',
     items: [
-      { icon: 'notifications', label: 'Notifications', color: Colors.primaryOrange, badge: '3' },
+      { icon: 'notifications', label: 'Notifications', color: Colors.primaryOrange },
       { icon: 'language', label: 'Language', color: Colors.info, desc: 'English' },
     ],
   },
@@ -45,18 +60,92 @@ const SETTINGS_SECTIONS: { title: string; items: SettingItem[] }[] = [
   },
 ];
 
+function PasscodeDot({ filled, error }: { filled: boolean; error: boolean }) {
+  return (
+    <View style={[styles.pinDot, filled && styles.pinDotFilled, error && styles.pinDotError]} />
+  );
+}
+
+function PinKey({ label, onPress, type }: { label: string; onPress: (v: string) => void; type?: 'number' | 'backspace' | 'empty' }) {
+  if (type === 'empty') return <View style={styles.pinKey} />;
+  if (type === 'backspace') {
+    return (
+      <TouchableOpacity style={styles.pinKey} onPress={() => onPress('backspace')} activeOpacity={0.4}>
+        <MaterialIcons name="backspace" size={24} color={Colors.textDark} />
+      </TouchableOpacity>
+    );
+  }
+  return (
+    <TouchableOpacity style={styles.pinKey} onPress={() => onPress(label)} activeOpacity={0.4}>
+      <Text style={styles.pinKeyText}>{label}</Text>
+    </TouchableOpacity>
+  );
+}
+
 export default function SettingsScreen() {
   const router = useRouter();
+  const { unreadCount } = useNotifications();
   const [hideProfile, setHideProfile] = useState(false);
+  const [showAdminGate, setShowAdminGate] = useState(false);
+  const [pin, setPin] = useState('');
+  const [pinError, setPinError] = useState(false);
+  const shakeAnim = useRef(new Animated.Value(0)).current;
+
+  const tapCount = useRef(0);
+  const lastTap = useRef(0);
+
+  const handleGearTap = () => {
+    const now = Date.now();
+    if (now - lastTap.current < 500) {
+      tapCount.current += 1;
+    } else {
+      tapCount.current = 1;
+    }
+    lastTap.current = now;
+    if (tapCount.current >= 3) {
+      tapCount.current = 0;
+      setPin('');
+      setPinError(false);
+      setShowAdminGate(true);
+    }
+  };
+
+  const handlePinPress = (val: string) => {
+    if (val === 'backspace') {
+      setPin((p) => p.slice(0, -1));
+      setPinError(false);
+      return;
+    }
+    if (pin.length >= 4) return;
+    const newPin = pin + val;
+    setPin(newPin);
+    if (newPin.length === 4) {
+      if (newPin === ADMIN_PIN) {
+        setShowAdminGate(false);
+        setPin('');
+        router.push('/admin-panel');
+      } else {
+        setPinError(true);
+        Animated.sequence([
+          Animated.timing(shakeAnim, { toValue: 10, duration: 50, useNativeDriver: true }),
+          Animated.timing(shakeAnim, { toValue: -10, duration: 50, useNativeDriver: true }),
+          Animated.timing(shakeAnim, { toValue: 8, duration: 50, useNativeDriver: true }),
+          Animated.timing(shakeAnim, { toValue: -8, duration: 50, useNativeDriver: true }),
+          Animated.timing(shakeAnim, { toValue: 0, duration: 50, useNativeDriver: true }),
+        ]).start();
+        setTimeout(() => { setPin(''); setPinError(false); }, 800);
+      }
+    }
+  };
 
   return (
     <View style={styles.container}>
       <Stack.Screen options={{ headerTitle: 'Settings' }} />
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <View style={styles.headerCard}>
-          <View style={styles.avatar}>
+          <TouchableOpacity style={styles.avatar} onPress={handleGearTap} activeOpacity={0.7}>
             <MaterialIcons name="settings" size={28} color={Colors.primaryGreen} />
-          </View>
+          </TouchableOpacity>
           <Text style={styles.headerTitle}>Settings</Text>
           <Text style={styles.headerSub}>Manage your account and preferences</Text>
         </View>
@@ -89,11 +178,11 @@ export default function SettingsScreen() {
                   <TouchableOpacity key={item.label} style={[styles.settingRow, !isLast && styles.settingBorder]} activeOpacity={0.6}
                     onPress={() => {
                       if (item.label === 'Edit Profile') router.push('/edit-profile');
-                      else if (item.label === 'Saved Locations') Alert.alert('Coming Soon', 'Saved locations will be available in the next update.');
-                      else if (item.label === 'Notifications') Alert.alert('Notifications', 'Notification preferences coming soon.');
+                      else if (item.label === 'Saved Locations') router.push('/saved-locations');
+                      else if (item.label === 'Notifications') router.push('/notifications' as any);
                       else if (item.label === 'Language') Alert.alert('Language', 'Language settings coming soon.');
-                      else if (item.label === 'Privacy & Security') Alert.alert('Privacy & Security', 'Privacy settings coming soon.');
-                      else if (item.label === 'Help Center') Alert.alert('Help Center', 'Help resources coming soon.');
+                      else if (item.label === 'Privacy & Security') router.push('/privacy-security' as any);
+                      else if (item.label === 'Help Center') router.push('/help-center' as any);
                       else if (item.label === 'Contact Us') Alert.alert('Contact Us', 'Support contact coming soon.');
                       else if (item.label === 'About BuildLinka') Alert.alert('About BuildLinka', 'BuildLinka v2.0.1\nYour trusted construction materials marketplace.');
                     }}
@@ -105,11 +194,15 @@ export default function SettingsScreen() {
                       <Text style={styles.settingLabel}>{item.label}</Text>
                       {item.desc && <Text style={styles.settingDesc}>{item.desc}</Text>}
                     </View>
-                    {item.badge && (
+                    {item.label === 'Notifications' && unreadCount > 0 ? (
+                      <View style={styles.badge}>
+                        <Text style={styles.badgeText}>{unreadCount > 9 ? '9+' : unreadCount}</Text>
+                      </View>
+                    ) : item.badge ? (
                       <View style={styles.badge}>
                         <Text style={styles.badgeText}>{item.badge}</Text>
                       </View>
-                    )}
+                    ) : null}
                     <MaterialIcons name="chevron-right" size={20} color={Colors.border} />
                   </TouchableOpacity>
                 );
@@ -125,6 +218,39 @@ export default function SettingsScreen() {
 
         <View style={{ height: 40 }} />
       </ScrollView>
+
+      <Modal visible={showAdminGate} transparent animationType="fade" onRequestClose={() => { setShowAdminGate(false); setPin(''); setPinError(false); }}>
+        <View style={styles.modalOverlay}>
+          <Animated.View style={[styles.modalCard, { transform: [{ translateX: shakeAnim }] }]}>
+            <TouchableOpacity style={styles.modalClose} onPress={() => { setShowAdminGate(false); setPin(''); setPinError(false); }}>
+              <MaterialIcons name="close" size={20} color={Colors.textLight} />
+            </TouchableOpacity>
+
+            <View style={styles.modalLockIcon}>
+              <MaterialIcons name="lock" size={28} color={Colors.primary} />
+            </View>
+            <Text style={styles.modalTitle}>Admin Access</Text>
+            <Text style={styles.modalSub}>Enter passcode to continue</Text>
+
+            <View style={styles.pinDots}>
+              {[0, 1, 2, 3].map((i) => (
+                <PasscodeDot key={i} filled={pin.length > i} error={pinError} />
+              ))}
+            </View>
+
+            <View style={styles.pinPad}>
+              {['1','2','3','4','5','6','7','8','9','','0','backspace'].map((v) => (
+                <PinKey
+                  key={v}
+                  label={v}
+                  onPress={handlePinPress}
+                  type={v === '' ? 'empty' : v === 'backspace' ? 'backspace' : 'number'}
+                />
+              ))}
+            </View>
+          </Animated.View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -235,5 +361,95 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '700',
     color: Colors.error,
+  },
+
+  /* ─── Passcode Modal ─── */
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalCard: {
+    backgroundColor: Colors.card,
+    borderRadius: 24,
+    padding: 28,
+    width: width - 48,
+    alignItems: 'center',
+    gap: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.15,
+    shadowRadius: 24,
+    elevation: 10,
+  },
+  modalClose: {
+    position: 'absolute',
+    top: 12,
+    right: 12,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: Colors.surfaceVariant,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalLockIcon: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: Colors.primaryGreen + '12',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 8,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: Colors.textDark,
+  },
+  modalSub: {
+    fontSize: 13,
+    color: Colors.textLight,
+    marginBottom: 8,
+  },
+  pinDots: {
+    flexDirection: 'row',
+    gap: 14,
+    paddingVertical: 16,
+  },
+  pinDot: {
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    backgroundColor: Colors.outlineVariant,
+  },
+  pinDotFilled: {
+    backgroundColor: Colors.primary,
+  },
+  pinDotError: {
+    backgroundColor: Colors.error,
+  },
+  pinPad: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    gap: 6,
+    paddingTop: 8,
+    width: '100%',
+    maxWidth: 280,
+  },
+  pinKey: {
+    width: 80,
+    height: 52,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: Colors.surface,
+  },
+  pinKeyText: {
+    fontSize: 22,
+    fontWeight: '700',
+    color: Colors.textDark,
   },
 });

@@ -8,6 +8,7 @@ import { Colors } from '../../constants/Colors';
 import { PRODUCTS } from '../../constants/MockData';
 import { useCart } from '../../contexts/CartContext';
 import ProductCard from '../../components/ProductCard';
+import KeyboardAwareWrapper from '../../components/KeyboardAwareWrapper';
 
 const GLASS_TYPES = [
   { name: 'All', icon: '🪟' },
@@ -48,7 +49,7 @@ export default function GlassScreen() {
 
   return (
     <View style={styles.container}>
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: insets.bottom + 20 }}>
+      <KeyboardAwareWrapper showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: insets.bottom + 20 }}>
         <LinearGradient colors={[Colors.tertiary, Colors.tertiaryContainer]} style={styles.header}>
           <View style={styles.headerContent}>
             <Text style={styles.headerEmoji}>🪟</Text>
@@ -141,7 +142,7 @@ export default function GlassScreen() {
             )}
           </View>
         </View>
-      </ScrollView>
+      </KeyboardAwareWrapper>
     </View>
   );
 }

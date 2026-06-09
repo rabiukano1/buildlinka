@@ -10,6 +10,7 @@ import {
   Dimensions,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
 import { Colors } from '../../constants/Colors';
 import { WORKERS, TRADES, type Worker } from '../../constants/MockData';
 import SearchBar from '../../components/SearchBar';
@@ -68,6 +69,7 @@ function WorkerGridCard({ worker }: { worker: Worker }) {
 }
 
 export default function WorkersScreen() {
+  const router = useRouter();
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedTrade, setSelectedTrade] = useState('All');
   const [availableOnly, setAvailableOnly] = useState(false);
@@ -154,6 +156,12 @@ export default function WorkersScreen() {
               size={20}
               color={Colors.primaryGreen}
             />
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.iconBtn, { backgroundColor: Colors.primary }]}
+            onPress={() => router.push('/workers-marketplace' as any)}
+          >
+            <MaterialIcons name="storefront" size={20} color="#fff" />
           </TouchableOpacity>
         </View>
       </View>

@@ -346,6 +346,7 @@ export default function MyListingsScreen() {
   };
 
   return (
+    <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={Platform.OS === 'ios' ? 120 : 0}>
     <View style={styles.container}>
       <Stack.Screen options={{ headerTitle: 'My Store' }} />
 
@@ -554,7 +555,7 @@ export default function MyListingsScreen() {
               </TouchableOpacity>
             </View>
 
-            <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 500 }}>
+            <ScrollView style={{ maxHeight: 500 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
               {/* Category Dropdown */}
               <Text style={styles.inputLabel}>Category</Text>
               <View ref={catBtnRef} collapsable={false}>
@@ -716,6 +717,7 @@ export default function MyListingsScreen() {
         </KeyboardAvoidingView>
       </Modal>
     </View>
+    </KeyboardAvoidingView>
   );
 }
 

@@ -131,11 +131,11 @@ export default function OnboardingScreen() {
   }, []);
 
   const handleSkip = useCallback(() => {
-    router.replace('/(tabs)');
+    router.replace('/persona-onboarding' as any);
   }, []);
 
   const handleGetStarted = useCallback(() => {
-    router.replace('/(tabs)');
+    router.replace('/persona-onboarding' as any);
   }, []);
 
   const isLastSlide = page === SLIDES.length - 1;

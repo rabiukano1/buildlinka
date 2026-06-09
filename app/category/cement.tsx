@@ -17,6 +17,7 @@ import { Colors } from '../../constants/Colors';
 import { PRODUCTS, type Product } from '../../constants/MockData';
 import { useCart } from '../../contexts/CartContext';
 import ProductCard from '../../components/ProductCard';
+import KeyboardAwareWrapper from '../../components/KeyboardAwareWrapper';
 
 const { width } = Dimensions.get('window');
 
@@ -59,7 +60,7 @@ export default function CementCategoryScreen() {
 
   return (
     <View style={styles.container}>
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: insets.bottom + 20 }}>
+      <KeyboardAwareWrapper showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: insets.bottom + 20 }}>
         {/* ─── Modern Header ─── */}
         <LinearGradient
           colors={[Colors.primary, Colors.primaryContainer]}
@@ -188,7 +189,7 @@ export default function CementCategoryScreen() {
             ))}
           </View>
         </View>
-      </ScrollView>
+      </KeyboardAwareWrapper>
     </View>
   );
 }

@@ -16,6 +16,7 @@ import { Colors } from '../../constants/Colors';
 import { PRODUCTS, type Product } from '../../constants/MockData';
 import { useCart } from '../../contexts/CartContext';
 import ProductCard from '../../components/ProductCard';
+import KeyboardAwareWrapper from '../../components/KeyboardAwareWrapper';
 
 const { width } = Dimensions.get('window');
 
@@ -59,7 +60,7 @@ export default function SteelIronScreen() {
 
   return (
     <View style={styles.container}>
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: insets.bottom + 20 }}>
+      <KeyboardAwareWrapper showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: insets.bottom + 20 }}>
         <LinearGradient
           colors={[Colors.primary, Colors.primaryContainer]}
           style={styles.header}
@@ -180,7 +181,7 @@ export default function SteelIronScreen() {
             )}
           </View>
         </View>
-      </ScrollView>
+      </KeyboardAwareWrapper>
     </View>
   );
 }

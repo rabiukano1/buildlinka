@@ -3,12 +3,13 @@ import { useRouter } from 'expo-router';
 import { MaterialIcons } from '@expo/vector-icons';
 import { Colors } from '../constants/Colors';
 import { useCart } from '../contexts/CartContext';
+import { PRODUCTS } from '../constants/MockData';
 
 const formatPrice = (price: number) => '₦' + price.toLocaleString('en-NG');
 
 export default function CartView() {
   const router = useRouter();
-  const { items, totalItems, totalPrice, updateQuantity, removeItem, clearCart } = useCart();
+  const { items, totalItems, totalPrice, addItem, updateQuantity, removeItem, clearCart } = useCart();
 
   if (items.length === 0) {
     return (
@@ -77,11 +78,19 @@ export default function CartView() {
                 <Text style={styles.totalLabel}>Total</Text>
                 <Text style={styles.totalValue}>{formatPrice(totalPrice)}</Text>
               </View>
-              <TouchableOpacity style={styles.checkoutBtn}>
+              <TouchableOpacity style={styles.checkoutBtn} onPress={() => router.push('/checkout' as any)}>
                 <MaterialIcons name="lock" size={16} color="#fff" />
                 <Text style={styles.checkoutText}>Proceed to Checkout</Text>
               </TouchableOpacity>
             </View>
+            <TouchableOpacity
+              style={styles.reviewBtn}
+              onPress={() => router.push('/my-cart' as any)}
+            >
+              <MaterialIcons name="shopping-cart" size={16} color={Colors.primaryGreen} />
+              <Text style={styles.reviewBtnText}>View Full Cart</Text>
+              <MaterialIcons name="chevron-right" size={18} color={Colors.primaryGreen} />
+            </TouchableOpacity>
             <TouchableOpacity style={styles.clearBtn} onPress={clearCart}>
               <MaterialIcons name="delete-outline" size={16} color={Colors.error} />
               <Text style={styles.clearText}>Clear Cart</Text>
@@ -265,6 +274,22 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 15,
     fontWeight: '800',
+  },
+  reviewBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 14,
+    backgroundColor: Colors.card,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: Colors.outlineVariant,
+  },
+  reviewBtnText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: Colors.primaryGreen,
   },
   clearBtn: {
     flexDirection: 'row',

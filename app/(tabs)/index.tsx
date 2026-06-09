@@ -22,8 +22,10 @@ import {
   type Worker,
   type Vendor,
 } from '../../constants/MockData';
+import KeyboardAwareWrapper from '../../components/KeyboardAwareWrapper';
 import { useCart } from '../../contexts/CartContext';
 import { useSaved } from '../../contexts/SavedItemsContext';
+import { useNotifications } from '../../contexts/NotificationContext';
 import SearchBar from '../../components/SearchBar';
 import CategoryCard from '../../components/CategoryCard';
 import ProductCard from '../../components/ProductCard';
@@ -54,12 +56,12 @@ function FadeInSection({ children, delay = 0 }: { children: React.ReactNode; del
   );
 }
 
-function SectionHeader({ title, action }: { title: string; action?: string }) {
+function SectionHeader({ title, action, onAction }: { title: string; action?: string; onAction?: () => void }) {
   return (
     <View style={styles.sectionHeader}>
       <Text style={styles.sectionTitle}>{title}</Text>
       {action && (
-        <TouchableOpacity style={styles.sectionAction}>
+        <TouchableOpacity style={styles.sectionAction} onPress={onAction}>
           <Text style={styles.sectionActionText}>{action}</Text>
           <MaterialIcons name="chevron-right" size={20} color={Colors.primaryGreen} />
         </TouchableOpacity>
@@ -107,6 +109,7 @@ export default function HomeScreen() {
   const router = useRouter();
   const { addItem } = useCart();
   const { isSaved, toggleSave } = useSaved();
+  const { unreadCount } = useNotifications();
   const [refreshing, setRefreshing] = useState(false);
   const [showAllCats, setShowAllCats] = useState(false);
 
@@ -125,10 +128,9 @@ export default function HomeScreen() {
 
   return (
     <View style={styles.wrapper}>
-      <ScrollView
+      <KeyboardAwareWrapper
         style={styles.container}
         contentContainerStyle={styles.contentContainer}
-        showsVerticalScrollIndicator={false}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.primaryGreen} />
         }
@@ -142,9 +144,13 @@ export default function HomeScreen() {
                 <Text style={styles.locationText}>Lagos, Nigeria</Text>
                 <MaterialIcons name="keyboard-arrow-down" size={18} color={Colors.textLight} />
               </View>
-              <TouchableOpacity style={styles.notifBtn}>
+              <TouchableOpacity style={styles.notifBtn} onPress={() => router.push('/notifications' as any)}>
                 <MaterialIcons name="notifications-none" size={24} color={Colors.textDark} />
-                <View style={styles.notifDot} />
+                {unreadCount > 0 && (
+                  <View style={styles.notifBadge}>
+                    <Text style={styles.notifBadgeText}>{unreadCount > 9 ? '9+' : unreadCount}</Text>
+                  </View>
+                )}
               </TouchableOpacity>
             </View>
             <Text style={styles.greeting}>Good morning 👋</Text>
@@ -191,8 +197,29 @@ export default function HomeScreen() {
           </TouchableOpacity>
         </FadeInSection>
 
-        {/* ─── Categories ─── */}
+        {/* ─── Build Project ─── */}
         <FadeInSection delay={240}>
+          <TouchableOpacity style={styles.buildCard} onPress={() => router.push('/build-project' as any)} activeOpacity={0.92}>
+            <LinearGradient
+              colors={['#6d5100', '#8a6a00']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={styles.buildGradient}
+            >
+              <View style={styles.buildIconBox}>
+                <MaterialIcons name="auto-awesome" size={22} color="#ffd54f" />
+              </View>
+              <View style={styles.buildContent}>
+                <Text style={styles.buildTitle}>AI-Powered Build Project</Text>
+                <Text style={styles.buildSub}>Get cost estimates, materials & workers in minutes</Text>
+              </View>
+              <MaterialIcons name="chevron-right" size={22} color="rgba(255,255,255,0.6)" />
+            </LinearGradient>
+          </TouchableOpacity>
+        </FadeInSection>
+
+        {/* ─── Categories ─── */}
+        <FadeInSection delay={320}>
           <View style={styles.section}>
             <SectionHeader title="Categories" action={showAllCats ? 'Show Less' : `+${CATEGORIES.length - VISIBLE_CATEGORIES} More`} />
             <View style={styles.categoryGrid}>
@@ -239,14 +266,14 @@ export default function HomeScreen() {
         </FadeInSection>
 
         {/* ─── Featured Banners ─── */}
-        <FadeInSection delay={320}>
+        <FadeInSection delay={400}>
           <View style={styles.section}>
             <FeaturedBanner />
           </View>
         </FadeInSection>
 
         {/* ─── Today's Best Deals ─── */}
-        <FadeInSection delay={400}>
+        <FadeInSection delay={480}>
           <View style={styles.section}>
             <SectionHeader title="Today's Best Deals" action="View All" />
             <ScrollView
@@ -271,9 +298,9 @@ export default function HomeScreen() {
         </FadeInSection>
 
         {/* ─── Popular Vendors ─── */}
-        <FadeInSection delay={480}>
+        <FadeInSection delay={560}>
           <View style={styles.section}>
-            <SectionHeader title="Popular Vendors" action="View All" />
+            <SectionHeader title="Popular Vendors" action="View All" onAction={() => router.push('/popular-vendors' as any)} />
             <ScrollView
               horizontal
               showsHorizontalScrollIndicator={false}
@@ -287,9 +314,9 @@ export default function HomeScreen() {
         </FadeInSection>
 
         {/* ─── Workers Near You ─── */}
-        <FadeInSection delay={560}>
+        <FadeInSection delay={640}>
           <View style={styles.section}>
-            <SectionHeader title="Workers Near You" action="View All" />
+            <SectionHeader title="Workers Near You" action="View All" onAction={() => router.push('/nearby' as any)} />
             <ScrollView
               horizontal
               showsHorizontalScrollIndicator={false}
@@ -306,7 +333,7 @@ export default function HomeScreen() {
 
         {/* ─── Bottom spacer ─── */}
         <View style={styles.bottomSpacer} />
-      </ScrollView>
+      </KeyboardAwareWrapper>
     </View>
   );
 }
@@ -354,16 +381,24 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  notifDot: {
+  notifBadge: {
     position: 'absolute',
-    top: 8,
-    right: 8,
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: Colors.primaryOrange,
-    borderWidth: 1.5,
+    top: -4,
+    right: -4,
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: Colors.error,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 4,
+    borderWidth: 2,
     borderColor: Colors.greenTint,
+  },
+  notifBadgeText: {
+    fontSize: 9,
+    fontWeight: '800',
+    color: '#fff',
   },
   greeting: {
     fontSize: 22,
@@ -493,6 +528,47 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: Colors.primaryGreen,
     fontWeight: '600',
+  },
+
+  /* ─── Build Project ─── */
+  buildCard: {
+    marginHorizontal: 20,
+    marginTop: 24,
+    borderRadius: 16,
+    overflow: 'hidden',
+    shadowColor: '#6d5100',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 6,
+  },
+  buildGradient: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 16,
+    gap: 14,
+  },
+  buildIconBox: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  buildContent: {
+    flex: 1,
+    gap: 2,
+  },
+  buildTitle: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: '#fff',
+  },
+  buildSub: {
+    fontSize: 11.5,
+    color: 'rgba(255,255,255,0.75)',
+    lineHeight: 15,
   },
 
   /* ─── Categories ─── */

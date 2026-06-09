@@ -1,3 +1,4 @@
+import KeyboardAwareWrapper from '../components/KeyboardAwareWrapper';
 import { useState, useMemo } from 'react';
 import { View, Text, ScrollView, StyleSheet, TouchableOpacity, TextInput, Alert, Image } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
@@ -50,7 +51,7 @@ export default function EditProfileScreen() {
   return (
     <View style={styles.container}>
       <Stack.Screen options={{ headerTitle: 'Edit Profile' }} />
-      <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: insets.bottom + 120 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+      <KeyboardAwareWrapper contentContainerStyle={{ padding: 20, paddingBottom: insets.bottom + 120 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
         <View style={styles.heroArea}>
           <TouchableOpacity style={styles.avatarWrap} onPress={pickAvatar} activeOpacity={0.8}>
             <LinearGradient colors={['#0d631b', '#0d631b', '#0d631b']} style={styles.avatarGradient}>
@@ -177,7 +178,7 @@ export default function EditProfileScreen() {
             </View>
           </View>
         </View>
-      </ScrollView>
+      </KeyboardAwareWrapper>
 
       <View style={[styles.footer, { paddingBottom: insets.bottom + 16 }]}>
         <TouchableOpacity style={styles.cancelBtn} onPress={() => router.back()} activeOpacity={0.7}>

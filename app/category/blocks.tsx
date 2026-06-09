@@ -8,6 +8,7 @@ import { Colors } from '../../constants/Colors';
 import { PRODUCTS } from '../../constants/MockData';
 import { useCart } from '../../contexts/CartContext';
 import ProductCard from '../../components/ProductCard';
+import KeyboardAwareWrapper from '../../components/KeyboardAwareWrapper';
 
 const BLOCK_TYPES = [
   { name: 'All', icon: '🧱' },
@@ -49,7 +50,7 @@ export default function BlocksScreen() {
 
   return (
     <View style={styles.container}>
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: insets.bottom + 20 }}>
+      <KeyboardAwareWrapper showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: insets.bottom + 20 }}>
         <LinearGradient colors={[Colors.primary, Colors.primaryContainer]} style={styles.header}>
           <View style={styles.headerContent}>
             <Text style={styles.headerEmoji}>🧱</Text>
@@ -142,7 +143,7 @@ export default function BlocksScreen() {
             )}
           </View>
         </View>
-      </ScrollView>
+      </KeyboardAwareWrapper>
     </View>
   );
 }

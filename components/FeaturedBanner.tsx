@@ -8,10 +8,10 @@ import {
   Animated,
   Dimensions,
 } from 'react-native';
+import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { MaterialIcons } from '@expo/vector-icons';
 import { Colors } from '../constants/Colors';
-import type { Vendor } from '../constants/MockData';
 
 const { width } = Dimensions.get('window');
 const CARD_WIDTH = width - 48;
@@ -25,6 +25,7 @@ const BANNER_DATA = [
     gradient: [Colors.primary, Colors.primaryContainer] as [string, string],
     emoji: '🏗️',
     tag: 'Limited Offer',
+    route: '/category/cement' as const,
   },
   {
     id: '2',
@@ -34,6 +35,7 @@ const BANNER_DATA = [
     gradient: [Colors.secondary, Colors.secondaryContainer] as [string, string],
     emoji: '👷',
     tag: 'New Feature',
+    route: '/workers-marketplace' as const,
   },
   {
     id: '3',
@@ -43,10 +45,12 @@ const BANNER_DATA = [
     gradient: [Colors.tertiary, Colors.tertiaryContainer] as [string, string],
     emoji: '🏠',
     tag: 'Hot Deal',
+    route: '/category/steel-iron' as const,
   },
 ];
 
 export default function FeaturedBanner() {
+  const router = useRouter();
   const scrollX = useRef(new Animated.Value(0)).current;
   const scrollRef = useRef<ScrollView>(null);
   const currentIndex = useRef(0);
@@ -79,7 +83,12 @@ export default function FeaturedBanner() {
         scrollEventThrottle={16}
       >
         {BANNER_DATA.map((item) => (
-          <TouchableOpacity key={item.id} activeOpacity={0.92} style={styles.cardWrapper}>
+          <TouchableOpacity
+            key={item.id}
+            activeOpacity={0.92}
+            style={styles.cardWrapper}
+            onPress={() => router.push(item.route as any)}
+          >
             <LinearGradient
               colors={item.gradient}
               start={{ x: 0, y: 0 }}
@@ -95,7 +104,10 @@ export default function FeaturedBanner() {
               <View style={styles.content}>
                 <Text style={styles.title}>{item.title}</Text>
                 <Text style={styles.subtitle} numberOfLines={2}>{item.subtitle}</Text>
-                <TouchableOpacity style={styles.ctaBtn}>
+                <TouchableOpacity
+                  style={styles.ctaBtn}
+                  onPress={() => router.push(item.route as any)}
+                >
                   <Text style={styles.ctaText}>{item.cta}</Text>
                   <MaterialIcons name="arrow-forward" size={16} color={item.gradient[0]} />
                 </TouchableOpacity>

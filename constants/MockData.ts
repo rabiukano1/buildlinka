@@ -35,6 +35,7 @@ export type Worker = {
   avatar: string;
   skills: string[];
   completedJobs: number;
+  isPopular?: boolean;
 };
 
 export type Vendor = {
@@ -46,6 +47,7 @@ export type Vendor = {
   verified: boolean;
   emoji: string;
   description: string;
+  isPopular?: boolean;
 };
 
 export const CATEGORIES: Category[] = [
@@ -192,6 +194,7 @@ export const WORKERS: Worker[] = [
     avatar: '👷',
     skills: ['Block Laying', 'Plastering', 'Tiling', 'Rendering'],
     completedJobs: 143,
+    isPopular: true,
   },
   {
     id: 'w2',
@@ -206,6 +209,7 @@ export const WORKERS: Worker[] = [
     avatar: '⚡',
     skills: ['Wiring', 'Panel Boards', 'Solar Install', 'CCTV'],
     completedJobs: 98,
+    isPopular: true,
   },
   {
     id: 'w3',
@@ -234,6 +238,7 @@ export const WORKERS: Worker[] = [
     avatar: '🪚',
     skills: ['Roofing', 'Formwork', 'Doors & Windows', 'Furniture'],
     completedJobs: 211,
+    isPopular: true,
   },
   {
     id: 'w5',
@@ -262,6 +267,7 @@ export const WORKERS: Worker[] = [
     avatar: '⚙️',
     skills: ['Welding', 'Gate Fabrication', 'Roofing Trusses', 'Railings'],
     completedJobs: 89,
+    isPopular: true,
   },
 ];
 
@@ -275,6 +281,7 @@ export const VENDORS: Vendor[] = [
     verified: true,
     emoji: '🏪',
     description: 'Your one-stop shop for all building materials',
+    isPopular: true,
   },
   {
     id: 'v2',
@@ -285,6 +292,7 @@ export const VENDORS: Vendor[] = [
     verified: true,
     emoji: '🏠',
     description: 'Premium roofing solutions across Nigeria',
+    isPopular: true,
   },
   {
     id: 'v3',
@@ -305,6 +313,7 @@ export const VENDORS: Vendor[] = [
     verified: true,
     emoji: '🏛️',
     description: 'Imported & local tiles at wholesale prices',
+    isPopular: true,
   },
 ];
 
@@ -318,4 +327,118 @@ export const TRADES = [
   'Welder',
   'Tiler',
   'Designer',
+];
+
+export type NotificationItem = {
+  id: string;
+  type: 'order' | 'price_drop' | 'worker' | 'stock' | 'review' | 'payment' | 'job' | 'system';
+  title: string;
+  message: string;
+  timestamp: string;
+  read: boolean;
+  icon: string;
+  actionRoute?: string;
+};
+
+export const NOTIFICATIONS: NotificationItem[] = [
+  {
+    id: 'n1',
+    type: 'order',
+    title: 'Order Shipped',
+    message: 'Your Dangote Cement (50kg × 20) has been shipped and is on its way.',
+    timestamp: '2 min ago',
+    read: false,
+    icon: 'local-shipping',
+    actionRoute: '/orders',
+  },
+  {
+    id: 'n2',
+    type: 'price_drop',
+    title: 'Price Drop Alert',
+    message: 'Steel Rod 12mm dropped from ₦6,800 to ₦6,200. Save ₦600 per piece!',
+    timestamp: '18 min ago',
+    read: false,
+    icon: 'trending-down',
+    actionRoute: '/category/steel-iron',
+  },
+  {
+    id: 'n3',
+    type: 'worker',
+    title: 'Worker Available Nearby',
+    message: 'Emeka Okafor (Master Mason) is available for work in your area starting tomorrow.',
+    timestamp: '1 hour ago',
+    read: false,
+    icon: 'handyman',
+    actionRoute: '/nearby',
+  },
+  {
+    id: 'n4',
+    type: 'stock',
+    title: 'Low Stock Warning',
+    message: 'Only 12 bags of Elephant Cement left in stock. Restock soon to avoid delays.',
+    timestamp: '2 hours ago',
+    read: false,
+    icon: 'inventory-2',
+    actionRoute: '/my-listings',
+  },
+  {
+    id: 'n5',
+    type: 'review',
+    title: 'New Review Received',
+    message: 'Rashidi B. left a 5-star review: "Excellent quality materials, fast delivery!"',
+    timestamp: '5 hours ago',
+    read: true,
+    icon: 'star',
+    actionRoute: '/my-reviews',
+  },
+  {
+    id: 'n6',
+    type: 'payment',
+    title: 'Payment Confirmed',
+    message: 'Your payment of ₦170,000 for Order #BLK-4821 has been confirmed and processed.',
+    timestamp: 'Yesterday',
+    read: true,
+    icon: 'payment',
+    actionRoute: '/orders',
+  },
+  {
+    id: 'n7',
+    type: 'job',
+    title: 'New Job Offer',
+    message: 'Luxury Homes Ltd wants to hire you for a 3-week tiling project in Lekki. Rate: ₦25,000/day.',
+    timestamp: 'Yesterday',
+    read: true,
+    icon: 'work',
+    actionRoute: '/worker-dashboard',
+  },
+  {
+    id: 'n8',
+    type: 'system',
+    title: 'BuildLinka Update',
+    message: 'We\'ve added new features including AI Project Builder. Check it out now!',
+    timestamp: '2 days ago',
+    read: true,
+    icon: 'new-releases',
+    actionRoute: '/build-project',
+  },
+  {
+    id: 'n9',
+    type: 'order',
+    title: 'Order Delivered',
+    message: 'Your tile order (Order #BLK-4790) has been delivered. Rate your experience!',
+    timestamp: '3 days ago',
+    read: true,
+    icon: 'check-circle',
+    actionRoute: '/orders',
+  },
+  {
+    id: 'n10',
+    type: 'price_drop',
+    title: 'Bulk Discount Available',
+    message: 'Buy 50+ bags of Dangote Cement and get 12% off. Limited time offer!',
+    timestamp: '5 days ago',
+    read: true,
+    icon: 'local-offer',
+    actionRoute: '/category/cement',
+  },
 ];

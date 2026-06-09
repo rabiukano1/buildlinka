@@ -1,3 +1,4 @@
+import KeyboardAwareWrapper from '../components/KeyboardAwareWrapper';
 import { useState, useRef, useMemo } from 'react';
 import { View, Text, ScrollView, StyleSheet, TouchableOpacity, TextInput, Alert, Image, ActionSheetIOS, Platform, Modal, Animated } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
@@ -546,7 +547,7 @@ export default function AddListingScreen() {
       
       <ProgressBar current={step} total={STEPS.length} />
 
-      <ScrollView 
+      <KeyboardAwareWrapper 
         ref={scrollRef} 
         contentContainerStyle={[styles.content, { paddingBottom: 120 + insets.bottom }]} 
         showsVerticalScrollIndicator={false} 
@@ -559,7 +560,7 @@ export default function AddListingScreen() {
         {step === 1 && renderDetailsStep()}
         {step === 2 && renderPricingStep()}
         {step === 3 && renderReviewStep()}
-      </ScrollView>
+      </KeyboardAwareWrapper>
 
       <View style={[styles.footer, { paddingBottom: Math.max(20, insets.bottom + 10) }]}>
         {step > 0 ? (
