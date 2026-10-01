@@ -9,17 +9,20 @@ export type LocationCoords = {
 type LocationState = {
   coords: LocationCoords | null;
   address: string | null;
+  place: Location.LocationGeocodedAddress | null;
   error: string | null;
   loading: boolean;
   permission: 'undetermined' | 'granted' | 'denied';
   refresh: () => Promise<void>;
 };
 
-export function useLocation(): LocationState {
+/** `auto: false` waits for `refresh()` so the permission prompt only appears when the user asks. */
+export function useLocation({ auto = true }: { auto?: boolean } = {}): LocationState {
   const [coords, setCoords] = useState<LocationCoords | null>(null);
   const [address, setAddress] = useState<string | null>(null);
+  const [place, setPlace] = useState<Location.LocationGeocodedAddress | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(auto);
   const [permission, setPermission] = useState<'undetermined' | 'granted' | 'denied'>('undetermined');
 
   const refresh = async () => {
@@ -44,6 +47,7 @@ export function useLocation(): LocationState {
       const geocode = await Location.reverseGeocodeAsync({ latitude, longitude });
       if (geocode.length > 0) {
         const a = geocode[0];
+        setPlace(a);
         const parts = [a.city, a.region, a.country].filter(Boolean);
         setAddress(parts.join(', '));
       }
@@ -55,8 +59,8 @@ export function useLocation(): LocationState {
   };
 
   useEffect(() => {
-    refresh();
+    if (auto) refresh();
   }, []);
 
-  return { coords, address, error, loading, permission, refresh };
+  return { coords, address, place, error, loading, permission, refresh };
 }

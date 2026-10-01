@@ -5,6 +5,7 @@ import { CartProvider } from '../contexts/CartContext';
 import { SavedProvider } from '../contexts/SavedItemsContext';
 import { NotificationProvider } from '../contexts/NotificationContext';
 import { FeaturedProvider } from '../contexts/FeaturedContext';
+import { EngineerProvider } from '../contexts/EngineerContext';
 
 export default function RootLayout() {
   return (
@@ -13,6 +14,7 @@ export default function RootLayout() {
       <SavedProvider>
       <NotificationProvider>
       <FeaturedProvider>
+      <EngineerProvider>
       <Stack screenOptions={{ headerShown: false }}>
         <Stack.Screen name="index" options={{ headerShown: false }} />
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
@@ -383,6 +385,7 @@ export default function RootLayout() {
           }}
         />
       </Stack>
+      </EngineerProvider>
       </FeaturedProvider>
       </NotificationProvider>
       </SavedProvider>

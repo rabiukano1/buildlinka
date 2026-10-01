@@ -20,6 +20,8 @@ export type Product = {
   imageEmoji: string;
   imageUrl?: string;
   badge?: string;
+  /** EAN-13 printed on the pack, used by the barcode scanner. */
+  barcode?: string;
 };
 
 export type Worker = {
@@ -68,6 +70,7 @@ export const CATEGORIES: Category[] = [
 export const PRODUCTS: Product[] = [
   {
     id: 'p1',
+    barcode: '6151234000015',
     name: 'Dangote Cement 42.5R (50kg)',
     price: 8500,
     unit: 'bag',
@@ -83,6 +86,7 @@ export const PRODUCTS: Product[] = [
   },
   {
     id: 'p2',
+    barcode: '6151234000022',
     name: 'Elephant Cement (50kg)',
     price: 8200,
     unit: 'bag',
@@ -96,6 +100,7 @@ export const PRODUCTS: Product[] = [
   },
   {
     id: 'p3',
+    barcode: '6151234000039',
     name: 'Aluminum Roofing Sheet (0.5mm)',
     price: 4200,
     unit: 'sheet',
@@ -111,6 +116,7 @@ export const PRODUCTS: Product[] = [
   },
   {
     id: 'p4',
+    barcode: '6151234000046',
     name: 'Iron Rod 12mm (6m)',
     price: 6800,
     unit: 'piece',
@@ -124,6 +130,7 @@ export const PRODUCTS: Product[] = [
   },
   {
     id: 'p5',
+    barcode: '6151234000053',
     name: 'Ceramic Floor Tiles 60x60cm',
     price: 3500,
     unit: 'm²',
@@ -139,6 +146,7 @@ export const PRODUCTS: Product[] = [
   },
   {
     id: 'p6',
+    barcode: '6151234000060',
     name: 'PVC Water Pipe 3/4 inch (9m)',
     price: 2800,
     unit: 'piece',
@@ -152,6 +160,7 @@ export const PRODUCTS: Product[] = [
   },
   {
     id: 'p7',
+    barcode: '6151234000077',
     name: 'Sandcrete Block (9 inches)',
     price: 400,
     unit: 'piece',
@@ -166,6 +175,7 @@ export const PRODUCTS: Product[] = [
   },
   {
     id: 'p8',
+    barcode: '6151234000084',
     name: 'Emulsion Paint 20L (White)',
     price: 12500,
     unit: 'bucket',

@@ -1,213 +1,309 @@
-import { useState, useMemo } from 'react';
-import {
-  View,
-  Text,
-  ScrollView,
-  StyleSheet,
-  TouchableOpacity,
-  TextInput,
-  Dimensions,
-} from 'react-native';
-import { Stack, useRouter } from 'expo-router';
+import { useMemo, useState } from 'react';
+import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Alert } from 'react-native';
+import { useRouter } from 'expo-router';
 import { MaterialIcons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors } from '../../constants/Colors';
-import { PRODUCTS } from '../../constants/MockData';
+import { PRODUCTS, VENDORS } from '../../constants/MockData';
 import { useCart } from '../../contexts/CartContext';
+import { useSaved } from '../../contexts/SavedItemsContext';
 import ProductCard from '../../components/ProductCard';
 import KeyboardAwareWrapper from '../../components/KeyboardAwareWrapper';
+import { CategoryHeader } from '../../components/CategoryShell';
+import { Chip, Field } from '../../components/EngineerUI';
+import { estimateRoof, type RoofStyle } from '../../lib/roofEstimate';
 
-const ROOF_TYPES = [
-  { name: 'All', icon: '🏠' },
-  { name: 'Aluminum', icon: '📋' },
-  { name: 'Stone Coated', icon: '🪨' },
-  { name: 'PVC', icon: '🔧' },
-  { name: 'Asbestos', icon: '⬜' },
-];
+const formatPrice = (n: number) => '₦' + Math.round(n).toLocaleString('en-NG');
 
-const ROOF_DEALS = [
-  { id: 'r1', title: 'Aluminum Bundle', qty: '20 sheets', discount: '10% Off', price: '₦75,600' },
-  { id: 'r2', title: 'Stone Coat Pack', qty: '15 sheets', discount: '15% Off', price: '₦142,500' },
-  { id: 'r3', title: 'Roofing Nail Box', qty: '50kg', discount: '5% Off', price: '₦18,500' },
+// Typical figures; coverage is the effective area one sheet/tile covers after side and end laps.
+const SHEET_TYPES = [
+  { id: 'aluminium', label: 'Aluminium long-span', short: 'Aluminium', icon: 'view-stream', coverage: 1.8, fixingsPerM2: 6, productId: 'p3', lifespan: '30–40 yrs', noise: 'Loud in rain', heat: 'Reflects heat', cost: 2 },
+  { id: 'stone', label: 'Stone-coated tile', short: 'Stone-coated', icon: 'texture', coverage: 0.48, fixingsPerM2: 10, productId: null, lifespan: '50+ yrs', noise: 'Quiet', heat: 'Well insulated', cost: 3 },
+  { id: 'pvc', label: 'PVC / polycarbonate', short: 'PVC', icon: 'wb-sunny', coverage: 1.7, fixingsPerM2: 6, productId: null, lifespan: '10–20 yrs', noise: 'Medium', heat: 'Lets light in', cost: 1 },
+] as const;
+
+const STYLES: { id: RoofStyle; label: string; icon: string }[] = [
+  { id: 'gable', label: 'Gable', icon: 'change-history' },
+  { id: 'hip', label: 'Hip', icon: 'roofing' },
+  { id: 'flat', label: 'Lean-to', icon: 'trending-flat' },
 ];
+const PITCHES = [{ deg: 15, label: 'Low 15°' }, { deg: 25, label: 'Standard 25°' }, { deg: 35, label: 'Steep 35°' }];
+const OVERHANGS = [0.3, 0.6, 0.9];
+const WASTES = [5, 10, 15];
 
 export default function RoofingScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { addItem } = useCart();
-  const [selectedType, setSelectedType] = useState('All');
+  const { isSaved, toggleSave } = useSaved();
+
+  const [typeId, setTypeId] = useState<(typeof SHEET_TYPES)[number]['id']>('aluminium');
+  const [style, setStyle] = useState<RoofStyle>('gable');
   const [length, setLength] = useState('');
   const [width, setWidth] = useState('');
+  const [pitch, setPitch] = useState(25);
+  const [overhang, setOverhang] = useState(0.6);
   const [waste, setWaste] = useState(10);
 
-  const products = useMemo(() => {
-    let list = PRODUCTS.filter((p) => p.category === 'Roofing');
-    if (selectedType !== 'All') {
-      list = list.filter((p) => p.name.toLowerCase().includes(selectedType.toLowerCase()));
-    }
-    return list;
-  }, [selectedType]);
+  const type = SHEET_TYPES.find((t) => t.id === typeId)!;
+  const product = type.productId ? PRODUCTS.find((p) => p.id === type.productId) : undefined;
+  const roofingProducts = PRODUCTS.filter((p) => p.category === 'Roofing');
+  const vendor = VENDORS.find((v) => v.category === 'Roofing');
 
-  const sheetsNeeded = useMemo(() => {
-    const l = parseFloat(length);
-    const w = parseFloat(width);
-    if (isNaN(l) || isNaN(w) || l <= 0 || w <= 0) return 0;
-    const area = l * w;
-    const wasteFactor = 1 + (waste || 0) / 100;
-    return Math.ceil((area / 2.5) * wasteFactor);
-  }, [length, width, waste]);
+  const estimate = useMemo(
+    () => estimateRoof({
+      length: parseFloat(length),
+      width: parseFloat(width),
+      style,
+      pitchDeg: style === 'flat' ? 5 : pitch,
+      overhang,
+      wastePct: waste,
+      coverage: type.coverage,
+      fixingsPerM2: type.fixingsPerM2,
+    }),
+    [length, width, style, pitch, overhang, waste, type]
+  );
+
+  const addEstimateToCart = () => {
+    if (!estimate || !product) return;
+    addItem(product, estimate.sheets);
+    Alert.alert('Added to cart', `${estimate.sheets} × ${product.name}`, [
+      { text: 'Keep browsing', style: 'cancel' },
+      { text: 'View cart', onPress: () => router.push('/cart' as any) },
+    ]);
+  };
 
   return (
     <View style={styles.container}>
-      <KeyboardAwareWrapper showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: insets.bottom + 20 }}>
-        <LinearGradient colors={[Colors.primary, Colors.primaryContainer]} style={styles.header}>
-          <View style={styles.headerContent}>
-            <Text style={styles.headerEmoji}>🏠</Text>
-            <Text style={styles.headerTitle}>Roofing</Text>
-            <Text style={styles.headerSub}>Quality roofing sheets for every budget</Text>
-            <View style={styles.trustRow}>
-              <View style={styles.trustItem}>
-                <MaterialIcons name="verified" size={14} color={Colors.greenTint} />
-                <Text style={styles.trustText}>Weatherproof</Text>
+      <KeyboardAwareWrapper contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 32 }]}>
+        <CategoryHeader title='Roofing' emoji='🏠' heroTitle='Roof it right, first time' heroSub='Work out exactly how many sheets you need, then order in one tap.' trust={[['verified', 'Weatherproof'], ['local-shipping', 'Nationwide'], ['engineering', 'Installers']]} />
+
+        <Text style={styles.sectionTitle}>Roof estimator</Text>
+        <View style={styles.card}>
+          <Text style={styles.label}>Roofing type</Text>
+          <View style={styles.wrap}>
+            {SHEET_TYPES.map((t) => <Chip key={t.id} label={t.short} icon={t.icon} active={typeId === t.id} onPress={() => setTypeId(t.id)} />)}
+          </View>
+
+          <Text style={styles.label}>Roof shape</Text>
+          <View style={styles.styleRow}>
+            {STYLES.map((s) => {
+              const active = style === s.id;
+              return (
+                <TouchableOpacity key={s.id} style={[styles.styleCard, active && styles.styleCardActive]} onPress={() => setStyle(s.id)} activeOpacity={0.7}>
+                  <MaterialIcons name={s.icon as any} size={26} color={active ? Colors.primary : Colors.onSurfaceVariant} />
+                  <Text style={[styles.styleText, active && styles.styleTextActive]}>{s.label}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+
+          <View style={styles.split}>
+            <View style={styles.flex}>
+              <Field label="Building length (m)" placeholder="12" keyboardType="decimal-pad" value={length} onChangeText={(t) => setLength(t.replace(/[^0-9.]/g, ''))} />
+            </View>
+            <View style={styles.flex}>
+              <Field label="Building width (m)" placeholder="10" keyboardType="decimal-pad" value={width} onChangeText={(t) => setWidth(t.replace(/[^0-9.]/g, ''))} />
+            </View>
+          </View>
+
+          {style !== 'flat' && (
+            <>
+              <Text style={styles.label}>Pitch</Text>
+              <View style={styles.wrap}>
+                {PITCHES.map((p) => <Chip key={p.deg} label={p.label} active={pitch === p.deg} onPress={() => setPitch(p.deg)} />)}
               </View>
-              <View style={styles.trustItem}>
-                <MaterialIcons name="local-shipping" size={14} color={Colors.greenTint} />
-                <Text style={styles.trustText}>Nationwide</Text>
+            </>
+          )}
+
+          <View style={styles.split}>
+            <View style={styles.flex}>
+              <Text style={styles.label}>Overhang</Text>
+              <View style={styles.wrap}>
+                {OVERHANGS.map((o) => <Chip key={o} label={`${o} m`} active={overhang === o} onPress={() => setOverhang(o)} />)}
               </View>
             </View>
           </View>
-          <View style={[styles.shape, styles.shape1]} />
-          <View style={[styles.shape, styles.shape2]} />
-        </LinearGradient>
-
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Roofing Type</Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipScroll}>
-            {ROOF_TYPES.map((t) => (
-              <TouchableOpacity
-                key={t.name}
-                style={[styles.chip, selectedType === t.name && styles.chipActive]}
-                onPress={() => setSelectedType(t.name)}
-              >
-                <Text style={styles.chipIcon}>{t.icon}</Text>
-                <Text style={[styles.chipText, selectedType === t.name && styles.chipTextActive]}>{t.name}</Text>
-              </TouchableOpacity>
-            ))}
-          </ScrollView>
-        </View>
-
-        <View style={styles.section}>
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Bulk Deals</Text>
-            <Text style={styles.saveTag}>SAVE BIG</Text>
+          <Text style={styles.label}>Extra for cuts & waste</Text>
+          <View style={[styles.wrap, styles.noMargin]}>
+            {WASTES.map((w) => <Chip key={w} label={`${w}%`} active={waste === w} onPress={() => setWaste(w)} />)}
           </View>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.dealScroll}>
-            {ROOF_DEALS.map((d) => (
-              <TouchableOpacity key={d.id} style={styles.dealCard}>
-                <View style={styles.dealBadge}><Text style={styles.dealBadgeText}>{d.discount}</Text></View>
-                <Text style={styles.dealTitle}>{d.title}</Text>
-                <Text style={styles.dealQty}>{d.qty}</Text>
-                <Text style={styles.dealPrice}>{d.price}</Text>
-                <View style={styles.dealAction}>
-                  <Text style={styles.dealActionText}>View Deal</Text>
-                  <MaterialIcons name="arrow-forward" size={14} color={Colors.primary} />
-                </View>
-              </TouchableOpacity>
-            ))}
-          </ScrollView>
-        </View>
 
-        <View style={styles.section}>
-          <View style={styles.calcCard}>
-            <LinearGradient colors={['#f8f9fa', '#ffffff']} style={styles.calcInner}>
-              <View style={styles.calcHeader}>
-                <MaterialIcons name="calculate" size={24} color={Colors.primary} />
-                <Text style={styles.calcTitle}>Roof Sheet Calculator</Text>
+          {estimate ? (
+            <View style={styles.result}>
+              <Text style={styles.resultLabel}>You need about</Text>
+              <Text style={styles.resultBig}>
+                {estimate.sheets.toLocaleString('en-NG')} <Text style={styles.resultUnit}>{type.id === 'stone' ? 'tiles' : 'sheets'}</Text>
+              </Text>
+              <View style={styles.metrics}>
+                {[
+                  ['Roof area', `${estimate.area.toFixed(1)} m²`],
+                  ['Ridge & hip caps', estimate.ridge ? `${estimate.ridge.toFixed(1)} m` : '—'],
+                  [type.id === 'stone' ? 'Nails' : 'Screws', estimate.fixings.toLocaleString('en-NG')],
+                  ['Roof rise', `${estimate.rise.toFixed(2)} m`],
+                ].map(([k, v]) => (
+                  <View key={k} style={styles.metric}>
+                    <Text style={styles.metricValue}>{v}</Text>
+                    <Text style={styles.metricLabel}>{k}</Text>
+                  </View>
+                ))}
               </View>
-              <Text style={styles.calcSub}>Estimate sheets needed for your roof</Text>
-              <View style={styles.calcInputRow}>
-                <View style={styles.calcInputGroup}>
-                  <Text style={styles.calcInputLabel}>Length (m)</Text>
-                  <TextInput style={styles.calcInput} placeholder="e.g. 12" keyboardType="numeric" value={length} onChangeText={setLength} />
-                </View>
-                <View style={styles.calcInputGroup}>
-                  <Text style={styles.calcInputLabel}>Width (m)</Text>
-                  <TextInput style={styles.calcInput} placeholder="e.g. 10" keyboardType="numeric" value={width} onChangeText={setWidth} />
-                </View>
-                <View style={styles.calcInputGroup}>
-                  <Text style={styles.calcInputLabel}>Waste %</Text>
-                  <TextInput style={styles.calcInput} placeholder="10" keyboardType="numeric" value={String(waste)} onChangeText={(v) => setWaste(parseInt(v) || 0)} />
-                </View>
-              </View>
-              {sheetsNeeded > 0 && (
-                <View style={styles.resultArea}>
-                  <Text style={styles.resultLabel}>Estimated Sheets Needed:</Text>
-                  <Text style={styles.resultValue}>{sheetsNeeded} Sheets</Text>
-                  <Text style={styles.resultNote}>*Based on standard 2.5m² sheet coverage</Text>
+
+              {product ? (
+                <>
+                  <View style={styles.costRow}>
+                    <Text style={styles.costLabel}>Sheets at {formatPrice(product.price)} each</Text>
+                    <Text style={styles.cost}>{formatPrice(product.price * estimate.sheets)}</Text>
+                  </View>
+                  <TouchableOpacity style={styles.cta} onPress={addEstimateToCart} activeOpacity={0.8}>
+                    <MaterialIcons name="add-shopping-cart" size={20} color={Colors.onSecondary} />
+                    <Text style={styles.ctaText}>Add {estimate.sheets} sheets to cart</Text>
+                  </TouchableOpacity>
+                </>
+              ) : (
+                <View style={styles.notice}>
+                  <MaterialIcons name="info-outline" size={18} color={Colors.tertiary} />
+                  <Text style={styles.noticeText}>{type.label} isn't sold on BuildLinka yet. Share this estimate with a roofer or vendor for a quote.</Text>
                 </View>
               )}
-            </LinearGradient>
-          </View>
+              <Text style={styles.footnote}>
+                Assumes each {type.id === 'stone' ? 'tile' : 'sheet'} covers {type.coverage} m² after overlaps. Ask your roofer to confirm before ordering.
+              </Text>
+            </View>
+          ) : (
+            <View style={styles.resultEmpty}>
+              <MaterialIcons name="straighten" size={22} color={Colors.outline} />
+              <Text style={styles.resultEmptyText}>Enter the building's length and width to see your estimate.</Text>
+            </View>
+          )}
         </View>
 
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Available Products</Text>
-          <View style={styles.productList}>
-            {products.map((p) => (
-              <ProductCard key={p.id} product={p} horizontal onPress={() => router.push(`/product/${p.id}`)} onAddToCart={() => addItem(p)} />
-            ))}
+        <Text style={styles.sectionTitle}>Which roof suits you?</Text>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.compareRow}>
+          {SHEET_TYPES.map((t) => {
+            const active = typeId === t.id;
+            return (
+              <TouchableOpacity key={t.id} style={[styles.compareCard, active && styles.compareCardActive]} onPress={() => setTypeId(t.id)} activeOpacity={0.8}>
+                <View style={styles.compareHead}>
+                  <MaterialIcons name={t.icon as any} size={22} color={Colors.primary} />
+                  <Text style={styles.costLevel}>{'₦'.repeat(t.cost)}<Text style={styles.costLevelOff}>{'₦'.repeat(3 - t.cost)}</Text></Text>
+                </View>
+                <Text style={styles.compareTitle}>{t.label}</Text>
+                {[['schedule', t.lifespan], ['volume-up', t.noise], ['thermostat', t.heat]].map(([icon, text]) => (
+                  <View key={icon} style={styles.compareLine}>
+                    <MaterialIcons name={icon as any} size={16} color={Colors.outline} />
+                    <Text style={styles.compareText}>{text}</Text>
+                  </View>
+                ))}
+                <Text style={[styles.compareUse, active && styles.compareUseActive]}>{active ? '✓ Using in estimate' : 'Use in estimate'}</Text>
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
+
+        <Text style={styles.sectionTitle}>Roofing products</Text>
+        {roofingProducts.map((p) => (
+          <ProductCard
+            key={p.id}
+            product={p}
+            horizontal
+            onPress={() => router.push(`/product/${p.id}`)}
+            onAddToCart={() => addItem(p)}
+            onToggleSave={() => toggleSave(p)}
+            isSaved={isSaved(p.id)}
+          />
+        ))}
+
+        {vendor && (
+          <View style={[styles.card, styles.vendor]}>
+            <Text style={styles.vendorEmoji}>{vendor.emoji}</Text>
+            <View style={styles.flex}>
+              <View style={styles.vendorNameRow}>
+                <Text style={styles.vendorName}>{vendor.name}</Text>
+                {vendor.verified && <MaterialIcons name="verified" size={16} color={Colors.primary} />}
+              </View>
+              <Text style={styles.vendorMeta}>★ {vendor.rating} · {vendor.location}</Text>
+              <Text style={styles.vendorDesc}>{vendor.description}</Text>
+            </View>
           </View>
-        </View>
+        )}
+
+        <TouchableOpacity style={styles.installer} onPress={() => router.push('/(tabs)/workers' as any)} activeOpacity={0.85}>
+          <View style={styles.installerIcon}>
+            <MaterialIcons name="engineering" size={26} color={Colors.onPrimary} />
+          </View>
+          <View style={styles.flex}>
+            <Text style={styles.installerTitle}>Need it installed?</Text>
+            <Text style={styles.installerSub}>Hire a vetted roofer or carpenter near you</Text>
+          </View>
+          <MaterialIcons name="chevron-right" size={24} color={Colors.onPrimary} />
+        </TouchableOpacity>
       </KeyboardAwareWrapper>
     </View>
   );
 }
 
+const shadow = { shadowColor: '#1b1c1c', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 1 };
+
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
-  header: { height: 220, padding: 24, paddingTop: 40, overflow: 'hidden', justifyContent: 'center' },
-  headerContent: { zIndex: 2 },
-  headerEmoji: { fontSize: 48, marginBottom: 8 },
-  headerTitle: { fontSize: 28, fontWeight: '900', color: '#fff' },
-  headerSub: { fontSize: 14, color: 'rgba(255,255,255,0.85)', marginTop: 4 },
-  trustRow: { flexDirection: 'row', gap: 16, marginTop: 16 },
-  trustItem: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(255,255,255,0.15)', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 99 },
-  trustText: { color: '#fff', fontSize: 11, fontWeight: '600' },
-  shape: { position: 'absolute', borderRadius: 999, backgroundColor: 'rgba(255,255,255,0.08)' },
-  shape1: { width: 200, height: 200, top: -50, right: -50 },
-  shape2: { width: 150, height: 150, bottom: -30, left: -20 },
-  section: { marginTop: 24, paddingHorizontal: 20 },
-  sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
-  sectionTitle: { fontSize: 17, fontWeight: '800', color: Colors.textDark, marginBottom: 12 },
-  saveTag: { backgroundColor: Colors.secondary, color: '#fff', fontSize: 10, fontWeight: '900', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 4 },
-  chipScroll: { gap: 10 },
-  chip: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: Colors.card, paddingHorizontal: 16, paddingVertical: 10, borderRadius: 8, borderWidth: 1, borderColor: Colors.outlineVariant },
-  chipActive: { backgroundColor: Colors.primary, borderColor: Colors.primary },
-  chipIcon: { fontSize: 18 },
-  chipText: { fontSize: 13, fontWeight: '600', color: Colors.textMedium },
-  chipTextActive: { color: '#fff' },
-  dealScroll: { gap: 12 },
-  dealCard: { width: 160, backgroundColor: Colors.card, borderRadius: 8, padding: 16, borderLeftWidth: 4, borderLeftColor: Colors.secondary, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 },
-  dealBadge: { backgroundColor: Colors.secondaryContainer, alignSelf: 'flex-start', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, marginBottom: 8 },
-  dealBadgeText: { fontSize: 10, fontWeight: '800', color: Colors.onSecondaryContainer },
-  dealTitle: { fontSize: 14, fontWeight: '700', color: Colors.textDark },
-  dealQty: { fontSize: 12, color: Colors.textMedium, marginTop: 2 },
-  dealPrice: { fontSize: 16, fontWeight: '800', color: Colors.primary, marginTop: 8 },
-  dealAction: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 10 },
-  dealActionText: { fontSize: 11, fontWeight: '700', color: Colors.primary },
-  calcCard: { borderRadius: 8, overflow: 'hidden', borderWidth: 1, borderColor: Colors.outlineVariant, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 },
-  calcInner: { padding: 18 },
-  calcHeader: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 4 },
-  calcTitle: { fontSize: 16, fontWeight: '800', color: Colors.textDark },
-  calcSub: { fontSize: 12, color: Colors.textMedium, marginBottom: 16 },
-  calcInputRow: { flexDirection: 'row', gap: 12 },
-  calcInputGroup: { flex: 1, gap: 6 },
-  calcInputLabel: { fontSize: 11, fontWeight: '700', color: Colors.textLight },
-  calcInput: { backgroundColor: Colors.card, borderWidth: 1, borderColor: Colors.outlineVariant, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8, fontSize: 14, color: Colors.textDark },
-  resultArea: { marginTop: 18, paddingTop: 16, borderTopWidth: 1, borderTopColor: Colors.outlineVariant, alignItems: 'center' },
-  resultLabel: { fontSize: 12, fontWeight: '600', color: Colors.textMedium },
-  resultValue: { fontSize: 24, fontWeight: '900', color: Colors.secondary, marginTop: 4 },
-  resultNote: { fontSize: 10, color: Colors.textMuted, marginTop: 6 },
-  productList: { gap: 12, marginTop: 8 },
+  content: { padding: 16 },
+  flex: { flex: 1 },
+  noMargin: { marginBottom: 0 },
+
+
+  sectionTitle: { fontSize: 20, fontWeight: '600', color: Colors.onSurface, marginBottom: 12 },
+  card: { backgroundColor: Colors.card, borderRadius: 8, padding: 16, marginBottom: 24, ...shadow },
+  label: { fontSize: 14, fontWeight: '600', color: Colors.onSurface, marginBottom: 8 },
+  wrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 16 },
+  split: { flexDirection: 'row', gap: 12 },
+
+  styleRow: { flexDirection: 'row', gap: 8, marginBottom: 16 },
+  styleCard: { flex: 1, alignItems: 'center', gap: 4, paddingVertical: 12, borderRadius: 8, borderWidth: 1, borderColor: Colors.outlineVariant },
+  styleCardActive: { borderColor: Colors.primary, borderWidth: 2, paddingVertical: 11, backgroundColor: Colors.greenTint + '4d' },
+  styleText: { fontSize: 13, fontWeight: '600', color: Colors.onSurfaceVariant },
+  styleTextActive: { color: Colors.primary },
+
+  result: { marginTop: 20, padding: 16, borderRadius: 8, backgroundColor: Colors.background, borderLeftWidth: 4, borderLeftColor: Colors.secondary },
+  resultLabel: { fontSize: 14, color: Colors.onSurfaceVariant },
+  resultBig: { fontSize: 36, fontWeight: '700', color: Colors.onSurface, marginTop: 2 },
+  resultUnit: { fontSize: 18, fontWeight: '600', color: Colors.onSurfaceVariant },
+  metrics: { flexDirection: 'row', flexWrap: 'wrap', marginTop: 12, rowGap: 12 },
+  metric: { width: '50%' },
+  metricValue: { fontSize: 16, fontWeight: '700', color: Colors.onSurface },
+  metricLabel: { fontSize: 12, color: Colors.outline, marginTop: 2 },
+  costRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 16, paddingTop: 12, borderTopWidth: 1, borderTopColor: Colors.divider },
+  costLabel: { fontSize: 14, color: Colors.onSurfaceVariant, flex: 1 },
+  cost: { fontSize: 20, fontWeight: '700', color: Colors.onSurface },
+  cta: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, height: 52, borderRadius: 999, backgroundColor: Colors.secondary, marginTop: 12 },
+  ctaText: { fontSize: 16, fontWeight: '600', color: Colors.onSecondary },
+  notice: { flexDirection: 'row', gap: 8, marginTop: 16, padding: 12, borderRadius: 8, backgroundColor: Colors.amberLight + '80' },
+  noticeText: { flex: 1, fontSize: 13, color: Colors.onSurface, lineHeight: 18 },
+  footnote: { fontSize: 12, color: Colors.outline, marginTop: 12, lineHeight: 16 },
+  resultEmpty: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 20, padding: 16, borderRadius: 8, backgroundColor: Colors.background },
+  resultEmptyText: { flex: 1, fontSize: 14, color: Colors.onSurfaceVariant },
+
+  compareRow: { gap: 12, paddingBottom: 24 },
+  compareCard: { width: 200, padding: 16, borderRadius: 8, backgroundColor: Colors.card, borderWidth: 1, borderColor: Colors.divider, gap: 6 },
+  compareCardActive: { borderColor: Colors.primary, borderWidth: 2, padding: 15 },
+  compareHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  costLevel: { fontSize: 15, fontWeight: '700', color: Colors.secondary },
+  costLevelOff: { color: Colors.outlineVariant },
+  compareTitle: { fontSize: 15, fontWeight: '600', color: Colors.onSurface, marginBottom: 4 },
+  compareLine: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  compareText: { fontSize: 13, color: Colors.onSurfaceVariant },
+  compareUse: { fontSize: 13, fontWeight: '600', color: Colors.outline, marginTop: 6 },
+  compareUseActive: { color: Colors.primary },
+
+  vendor: { flexDirection: 'row', gap: 12, alignItems: 'center', marginTop: 12 },
+  vendorEmoji: { fontSize: 36 },
+  vendorNameRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  vendorName: { fontSize: 16, fontWeight: '600', color: Colors.onSurface },
+  vendorMeta: { fontSize: 13, color: Colors.outline, marginTop: 2 },
+  vendorDesc: { fontSize: 13, color: Colors.onSurfaceVariant, marginTop: 4 },
+
+  installer: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 16, borderRadius: 8, backgroundColor: Colors.primary },
+  installerIcon: { width: 48, height: 48, borderRadius: 24, backgroundColor: 'rgba(255,255,255,0.18)', alignItems: 'center', justifyContent: 'center' },
+  installerTitle: { fontSize: 16, fontWeight: '600', color: Colors.onPrimary },
+  installerSub: { fontSize: 13, color: Colors.greenTint, marginTop: 2 },
 });

@@ -1,207 +1,102 @@
-import { useState, useMemo } from 'react';
-import {
-  View,
-  Text,
-  ScrollView,
-  StyleSheet,
-  TouchableOpacity,
-  TextInput,
-  Dimensions,
-} from 'react-native';
-import { Stack, useRouter } from 'expo-router';
+import { useState } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors } from '../../constants/Colors';
-import { PRODUCTS } from '../../constants/MockData';
-import { useCart } from '../../contexts/CartContext';
-import ProductCard from '../../components/ProductCard';
-import KeyboardAwareWrapper from '../../components/KeyboardAwareWrapper';
+import CategoryShell, { Footnote, Label, Result, Wrap, EmptyResult } from '../../components/CategoryShell';
+import { Chip } from '../../components/EngineerUI';
+import { electricalLoad } from '../../lib/estimators';
 
-const ELEC_TYPES = [
-  { name: 'All', icon: '⚡' },
-  { name: 'Cables', icon: '🔌' },
-  { name: 'Switches', icon: '🔘' },
-  { name: 'Panels', icon: '📊' },
-  { name: 'Fittings', icon: '💡' },
-];
-
-const ELEC_DEALS = [
-  { id: 'e1', title: 'Cable Drum', qty: '100m', discount: '12% Off', price: '₦45,000' },
-  { id: 'e2', title: 'Switch Set', qty: '10 units', discount: '8% Off', price: '₦12,500' },
-  { id: 'e3', title: 'Panel Bundle', qty: '5 pcs', discount: '15% Off', price: '₦85,000' },
+// Typical running watts; nameplates vary.
+const APPLIANCES = [
+  { id: 'bulb', label: 'LED bulb', icon: 'lightbulb', watts: 10, start: 6 },
+  { id: 'fan', label: 'Ceiling fan', icon: 'toys', watts: 75, start: 2 },
+  { id: 'tv', label: 'TV', icon: 'tv', watts: 100, start: 1 },
+  { id: 'laptop', label: 'Laptop / phone', icon: 'laptop', watts: 65, start: 2 },
+  { id: 'fridge', label: 'Fridge', icon: 'kitchen', watts: 150, start: 1 },
+  { id: 'freezer', label: 'Deep freezer', icon: 'ac-unit', watts: 200, start: 0 },
+  { id: 'pump', label: 'Pumping machine', icon: 'water', watts: 750, start: 0 },
+  { id: 'ac', label: 'AC (1.5 HP)', icon: 'air', watts: 1100, start: 0 },
+  { id: 'iron', label: 'Pressing iron', icon: 'iron', watts: 1000, start: 0 },
 ];
 
 export default function ElectricalScreen() {
-  const router = useRouter();
-  const insets = useSafeAreaInsets();
-  const { addItem } = useCart();
-  const [selectedType, setSelectedType] = useState('All');
-  const [area, setArea] = useState('');
-  const [points, setPoints] = useState('');
+  const [qty, setQty] = useState<Record<string, number>>(Object.fromEntries(APPLIANCES.map((a) => [a.id, a.start])));
+  const [backup, setBackup] = useState(4);
 
-  const products = useMemo(() => {
-    let list = PRODUCTS.filter((p) => p.category === 'Electrical');
-    if (selectedType !== 'All') {
-      list = list.filter((p) => p.name.toLowerCase().includes(selectedType === 'Cables' ? 'cable' : selectedType.toLowerCase().slice(0, -1)));
-    }
-    return list;
-  }, [selectedType]);
-
-  const cableNeeded = useMemo(() => {
-    const a = parseFloat(area);
-    const p = parseInt(points) || 0;
-    if (isNaN(a) || a <= 0) return 0;
-    return Math.ceil(a * 1.5 + p * 5);
-  }, [area, points]);
+  const watts = APPLIANCES.reduce((s, a) => s + a.watts * (qty[a.id] ?? 0), 0);
+  const est = electricalLoad(watts, backup);
+  const change = (id: string, d: number) => setQty((q) => ({ ...q, [id]: Math.max(0, Math.min(50, (q[id] ?? 0) + d)) }));
 
   return (
-    <View style={styles.container}>
-      <KeyboardAwareWrapper showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: insets.bottom + 20 }}>
-        <LinearGradient colors={[Colors.tertiary, Colors.tertiaryContainer]} style={styles.header}>
-          <View style={styles.headerContent}>
-            <Text style={styles.headerEmoji}>⚡</Text>
-            <Text style={styles.headerTitle}>Electrical</Text>
-            <Text style={styles.headerSub}>Wires, switches, and fittings for safe wiring</Text>
-            <View style={styles.trustRow}>
-              <View style={styles.trustItem}>
-                <MaterialIcons name="verified" size={14} color={Colors.amberLight} />
-                <Text style={styles.trustText}>NAFECO Approved</Text>
-              </View>
-              <View style={styles.trustItem}>
-                <MaterialIcons name="security" size={14} color={Colors.amberLight} />
-                <Text style={styles.trustText}>Safety Tested</Text>
-              </View>
+    <CategoryShell
+      title="Electrical"
+      category="Electrical"
+      emoji="⚡"
+      heroTitle="Size your inverter, cable and battery"
+      heroSub="Tick what you want to power — we work out the load and the gear to match."
+      trust={[['verified', 'SON-approved'], ['local-shipping', 'Fast delivery'], ['solar-power', 'Solar ready']]}
+      estimatorTitle="Power planner"
+      tips={[
+        { icon: 'verified', title: 'Buy approved cable', text: 'Fake cable has thin copper and catches fire. Look for SON marks and check the copper is solid, not copper-coloured aluminium.' },
+        { icon: 'electrical-services', title: "Don't run heavy loads on inverters", text: 'Pressing irons, kettles and heaters drain batteries fast. Run them on grid or generator power.' },
+        { icon: 'power', title: 'Fit a changeover', text: 'A proper changeover switch keeps generator, grid and inverter power from ever meeting — it protects both you and NEPA linemen.' },
+      ]}
+      hire={{ title: 'Need an electrician?', sub: 'Hire a vetted electrician for wiring and solar', icon: 'bolt' }}
+    >
+      <Label>What do you want to power?</Label>
+      {APPLIANCES.map((a) => {
+        const n = qty[a.id] ?? 0;
+        return (
+          <View key={a.id} style={styles.item}>
+            <View style={[styles.icon, n > 0 && styles.iconOn]}>
+              <MaterialIcons name={a.icon as any} size={20} color={n > 0 ? Colors.onPrimary : Colors.onSurfaceVariant} />
             </View>
+            <View style={styles.flex}>
+              <Text style={styles.name}>{a.label}</Text>
+              <Text style={styles.watts}>{a.watts} W each</Text>
+            </View>
+            <TouchableOpacity style={styles.btn} onPress={() => change(a.id, -1)} disabled={n === 0} accessibilityLabel={`Fewer ${a.label}`}>
+              <MaterialIcons name="remove" size={18} color={n === 0 ? Colors.outlineVariant : Colors.primary} />
+            </TouchableOpacity>
+            <Text style={styles.qty}>{n}</Text>
+            <TouchableOpacity style={styles.btn} onPress={() => change(a.id, 1)} accessibilityLabel={`More ${a.label}`}>
+              <MaterialIcons name="add" size={18} color={Colors.primary} />
+            </TouchableOpacity>
           </View>
-          <View style={[styles.shape, styles.shape1]} />
-          <View style={[styles.shape, styles.shape2]} />
-        </LinearGradient>
+        );
+      })}
 
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Category</Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipScroll}>
-            {ELEC_TYPES.map((t) => (
-              <TouchableOpacity key={t.name} style={[styles.chip, selectedType === t.name && styles.chipActive]} onPress={() => setSelectedType(t.name)}>
-                <Text style={styles.chipIcon}>{t.icon}</Text>
-                <Text style={[styles.chipText, selectedType === t.name && styles.chipTextActive]}>{t.name}</Text>
-              </TouchableOpacity>
-            ))}
-          </ScrollView>
-        </View>
+      <Label>Backup time on battery</Label>
+      <Wrap last>{[0, 2, 4, 8].map((h) => <Chip key={h} label={h ? `${h} hours` : 'No battery'} active={backup === h} onPress={() => setBackup(h)} />)}</Wrap>
 
-        <View style={styles.section}>
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Bulk Deals</Text>
-            <Text style={styles.saveTag}>WHOLESALE</Text>
-          </View>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.dealScroll}>
-            {ELEC_DEALS.map((d) => (
-              <TouchableOpacity key={d.id} style={styles.dealCard}>
-                <View style={styles.dealBadge}><Text style={styles.dealBadgeText}>{d.discount}</Text></View>
-                <Text style={styles.dealTitle}>{d.title}</Text>
-                <Text style={styles.dealQty}>{d.qty}</Text>
-                <Text style={styles.dealPrice}>{d.price}</Text>
-                <View style={styles.dealAction}>
-                  <Text style={styles.dealActionText}>View Deal</Text>
-                  <MaterialIcons name="arrow-forward" size={14} color={Colors.primary} />
-                </View>
-              </TouchableOpacity>
-            ))}
-          </ScrollView>
-        </View>
-
-        <View style={styles.section}>
-          <View style={styles.calcCard}>
-            <LinearGradient colors={['#f8f9fa', '#ffffff']} style={styles.calcInner}>
-              <View style={styles.calcHeader}>
-                <MaterialIcons name="bolt" size={24} color={Colors.tertiary} />
-                <Text style={styles.calcTitle}>Cable Estimator</Text>
-              </View>
-              <Text style={styles.calcSub}>Estimate cable length for your project</Text>
-              <View style={styles.calcInputRow}>
-                <View style={styles.calcInputGroup}>
-                  <Text style={styles.calcInputLabel}>Floor Area (sqm)</Text>
-                  <TextInput style={styles.calcInput} placeholder="e.g. 100" keyboardType="numeric" value={area} onChangeText={setArea} />
-                </View>
-                <View style={styles.calcInputGroup}>
-                  <Text style={styles.calcInputLabel}>Power Points</Text>
-                  <TextInput style={styles.calcInput} placeholder="e.g. 12" keyboardType="numeric" value={points} onChangeText={setPoints} />
-                </View>
-              </View>
-              {cableNeeded > 0 && (
-                <View style={styles.resultArea}>
-                  <Text style={styles.resultLabel}>Estimated Cable Needed:</Text>
-                  <Text style={styles.resultValue}>{cableNeeded} metres</Text>
-                  <Text style={styles.resultNote}>*Includes wiring for lights & sockets</Text>
-                </View>
-              )}
-            </LinearGradient>
-          </View>
-        </View>
-
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Available Products</Text>
-          <View style={styles.productList}>
-            {products.length > 0 ? products.map((p) => (
-              <ProductCard key={p.id} product={p} horizontal onPress={() => router.push(`/product/${p.id}`)} onAddToCart={() => addItem(p)} />
-            )) : (
-              <View style={styles.empty}><Text style={styles.emptyIcon}>⚡</Text><Text style={styles.emptyText}>No products yet</Text></View>
-            )}
-          </View>
-        </View>
-      </KeyboardAwareWrapper>
-    </View>
+      {est ? (
+        <Result
+          label="Total load"
+          value={watts.toLocaleString('en-NG')}
+          unit="watts"
+          metrics={[
+            [est.inverterKva ? `${est.inverterKva} kVA` : '15 kVA+', 'Inverter / generator'],
+            [`${est.amps.toFixed(1)} A`, 'Current at 230 V'],
+            [est.cable ?? 'Ask an electrician', 'Main supply cable'],
+            [backup ? `${est.batteryKwh.toFixed(1)} kWh` : '—', `Battery for ${backup} h`],
+          ]}
+        >
+          <Footnote>Assumes everything runs at once, with 25% headroom for motor start-up. Fridges and pumps surge 3× on start — your electrician will confirm.</Footnote>
+        </Result>
+      ) : (
+        <EmptyResult text="Add at least one appliance to see your load." />
+      )}
+    </CategoryShell>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: Colors.background },
-  header: { height: 220, padding: 24, paddingTop: 40, overflow: 'hidden', justifyContent: 'center' },
-  headerContent: { zIndex: 2 },
-  headerEmoji: { fontSize: 48, marginBottom: 8 },
-  headerTitle: { fontSize: 28, fontWeight: '900', color: '#fff' },
-  headerSub: { fontSize: 14, color: 'rgba(255,255,255,0.85)', marginTop: 4 },
-  trustRow: { flexDirection: 'row', gap: 16, marginTop: 16 },
-  trustItem: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(255,255,255,0.15)', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 99 },
-  trustText: { color: '#fff', fontSize: 11, fontWeight: '600' },
-  shape: { position: 'absolute', borderRadius: 999, backgroundColor: 'rgba(255,255,255,0.08)' },
-  shape1: { width: 200, height: 200, top: -50, right: -50 },
-  shape2: { width: 150, height: 150, bottom: -30, left: -20 },
-  section: { marginTop: 24, paddingHorizontal: 20 },
-  sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
-  sectionTitle: { fontSize: 17, fontWeight: '800', color: Colors.textDark, marginBottom: 12 },
-  saveTag: { backgroundColor: Colors.secondary, color: '#fff', fontSize: 10, fontWeight: '900', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 4 },
-  chipScroll: { gap: 10 },
-  chip: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: Colors.card, paddingHorizontal: 16, paddingVertical: 10, borderRadius: 8, borderWidth: 1, borderColor: Colors.outlineVariant },
-  chipActive: { backgroundColor: Colors.tertiary, borderColor: Colors.tertiary },
-  chipIcon: { fontSize: 18 },
-  chipText: { fontSize: 13, fontWeight: '600', color: Colors.textMedium },
-  chipTextActive: { color: '#fff' },
-  dealScroll: { gap: 12 },
-  dealCard: { width: 160, backgroundColor: Colors.card, borderRadius: 8, padding: 16, borderLeftWidth: 4, borderLeftColor: Colors.secondary, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 },
-  dealBadge: { backgroundColor: Colors.secondaryContainer, alignSelf: 'flex-start', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, marginBottom: 8 },
-  dealBadgeText: { fontSize: 10, fontWeight: '800', color: Colors.onSecondaryContainer },
-  dealTitle: { fontSize: 14, fontWeight: '700', color: Colors.textDark },
-  dealQty: { fontSize: 12, color: Colors.textMedium, marginTop: 2 },
-  dealPrice: { fontSize: 16, fontWeight: '800', color: Colors.tertiary, marginTop: 8 },
-  dealAction: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 10 },
-  dealActionText: { fontSize: 11, fontWeight: '700', color: Colors.primary },
-  calcCard: { borderRadius: 8, overflow: 'hidden', borderWidth: 1, borderColor: Colors.outlineVariant, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 },
-  calcInner: { padding: 18 },
-  calcHeader: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 4 },
-  calcTitle: { fontSize: 16, fontWeight: '800', color: Colors.textDark },
-  calcSub: { fontSize: 12, color: Colors.textMedium, marginBottom: 16 },
-  calcInputRow: { flexDirection: 'row', gap: 12 },
-  calcInputGroup: { flex: 1, gap: 6 },
-  calcInputLabel: { fontSize: 11, fontWeight: '700', color: Colors.textLight },
-  calcInput: { backgroundColor: Colors.card, borderWidth: 1, borderColor: Colors.outlineVariant, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8, fontSize: 14, color: Colors.textDark },
-  resultArea: { marginTop: 18, paddingTop: 16, borderTopWidth: 1, borderTopColor: Colors.outlineVariant, alignItems: 'center' },
-  resultLabel: { fontSize: 12, fontWeight: '600', color: Colors.textMedium },
-  resultValue: { fontSize: 24, fontWeight: '900', color: Colors.tertiary, marginTop: 4 },
-  resultNote: { fontSize: 10, color: Colors.textMuted, marginTop: 6 },
-  productList: { gap: 12, marginTop: 8 },
-  empty: { alignItems: 'center', paddingVertical: 40, gap: 8 },
-  emptyIcon: { fontSize: 40 },
-  emptyText: { fontSize: 13, color: Colors.textLight },
+  flex: { flex: 1 },
+  item: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: Colors.divider },
+  icon: { width: 36, height: 36, borderRadius: 18, backgroundColor: Colors.surfaceVariant + '99', alignItems: 'center', justifyContent: 'center' },
+  iconOn: { backgroundColor: Colors.primary },
+  name: { fontSize: 15, fontWeight: '600', color: Colors.onSurface },
+  watts: { fontSize: 12, color: Colors.outline },
+  btn: { width: 36, height: 36, borderRadius: 18, borderWidth: 1, borderColor: Colors.outlineVariant, alignItems: 'center', justifyContent: 'center' },
+  qty: { minWidth: 24, textAlign: 'center', fontSize: 16, fontWeight: '700', color: Colors.onSurface },
 });

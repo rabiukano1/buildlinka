@@ -26,7 +26,6 @@ import KeyboardAwareWrapper from '../../components/KeyboardAwareWrapper';
 import { useCart } from '../../contexts/CartContext';
 import { useSaved } from '../../contexts/SavedItemsContext';
 import { useNotifications } from '../../contexts/NotificationContext';
-import SearchBar from '../../components/SearchBar';
 import CategoryCard from '../../components/CategoryCard';
 import ProductCard from '../../components/ProductCard';
 import FeaturedBanner from '../../components/FeaturedBanner';
@@ -161,7 +160,16 @@ export default function HomeScreen() {
         {/* ─── Search ─── */}
         <FadeInSection delay={80}>
           <View style={styles.searchSection}>
-            <SearchBar placeholder="Find materials, workers, services..." />
+            <TouchableOpacity style={styles.searchBox} onPress={() => router.push('/search' as any)} activeOpacity={0.8} accessibilityRole="search" accessibilityLabel="Search">
+              <MaterialIcons name="search" size={22} color={Colors.outline} />
+              <Text style={styles.searchPlaceholder} numberOfLines={1}>Search materials, workers…</Text>
+              <TouchableOpacity style={styles.searchIconBtn} onPress={() => router.push('/search?mode=scan' as any)} hitSlop={6} accessibilityLabel="Scan barcode">
+                <MaterialIcons name="qr-code-scanner" size={22} color={Colors.primary} />
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.searchIconBtn} onPress={() => router.push('/search?mode=image' as any)} hitSlop={6} accessibilityLabel="Search by photo">
+                <MaterialIcons name="photo-camera" size={22} color={Colors.primary} />
+              </TouchableOpacity>
+            </TouchableOpacity>
           </View>
         </FadeInSection>
 
@@ -416,6 +424,36 @@ const styles = StyleSheet.create({
   searchSection: {
     paddingHorizontal: 20,
     paddingVertical: 6,
+  },
+  searchBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    height: 52,
+    paddingLeft: 16,
+    paddingRight: 6,
+    borderRadius: 999,
+    backgroundColor: Colors.card,
+    borderWidth: 1,
+    borderColor: Colors.outlineVariant,
+    shadowColor: '#1b1c1c',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.06,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  searchPlaceholder: {
+    flex: 1,
+    fontSize: 16,
+    color: Colors.outline,
+  },
+  searchIconBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: Colors.greenTint + '80',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 
   /* ─── Hero ─── */

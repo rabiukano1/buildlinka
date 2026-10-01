@@ -243,7 +243,7 @@ export default function VendorDashboardScreen() {
             <MaterialIcons name="inventory" size={22} color={Colors.primary} />
             <Text style={styles.quickActionText}>Inventory</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.quickAction} onPress={() => router.push('/settings' as any)}>
+          <TouchableOpacity style={styles.quickAction} onPress={() => router.push('/settings?role=vendor' as any)}>
             <MaterialIcons name="settings" size={22} color={Colors.primary} />
             <Text style={styles.quickActionText}>Settings</Text>
           </TouchableOpacity>

@@ -1,207 +1,75 @@
-import { useState, useMemo } from 'react';
-import { View, Text, ScrollView, StyleSheet, TouchableOpacity, TextInput } from 'react-native';
-import { useRouter } from 'expo-router';
-import { MaterialIcons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Colors } from '../../constants/Colors';
+import { useState } from 'react';
 import { PRODUCTS } from '../../constants/MockData';
-import { useCart } from '../../contexts/CartContext';
-import ProductCard from '../../components/ProductCard';
-import KeyboardAwareWrapper from '../../components/KeyboardAwareWrapper';
+import CategoryShell, { EmptyResult, Footnote, Label, OrderLine, Result, Row, Stepper, Wrap, numeric } from '../../components/CategoryShell';
+import { Chip, Field } from '../../components/EngineerUI';
+import { paint } from '../../lib/estimators';
 
-const PAINT_TYPES = [
-  { name: 'All', icon: '🎨' },
-  { name: 'Emulsion', icon: '🖌️' },
-  { name: 'Gloss', icon: '✨' },
-  { name: 'Texture', icon: '🏛️' },
-  { name: 'Primer', icon: '🧹' },
-];
-
-const PAINT_DEALS = [
-  { id: 'pt1', title: 'Emulsion Bundle', qty: '4 buckets', discount: '15% Off', price: '₦42,500' },
-  { id: 'pt2', title: 'Gloss Set', qty: '3 buckets', discount: '10% Off', price: '₦38,000' },
-  { id: 'pt3', title: 'Primer Pack', qty: '5 buckets', discount: '12% Off', price: '₦55,000' },
+const FINISHES = [
+  { id: 'emulsion', label: 'Emulsion', rate: 10, note: 'Walls & ceilings' },
+  { id: 'gloss', label: 'Gloss', rate: 12, note: 'Doors, wood, metal' },
+  { id: 'texture', label: 'Textured', rate: 4, note: 'Exterior walls' },
 ];
 
 export default function PaintScreen() {
-  const router = useRouter();
-  const insets = useSafeAreaInsets();
-  const { addItem } = useCart();
-  const [selectedType, setSelectedType] = useState('All');
-  const [wallLength, setWallLength] = useState('');
-  const [wallHeight, setWallHeight] = useState('');
-  const [coats, setCoats] = useState('2');
+  const [length, setLength] = useState('');
+  const [width, setWidth] = useState('');
+  const [height, setHeight] = useState('3');
+  const [doors, setDoors] = useState(1);
+  const [windows, setWindows] = useState(1);
+  const [coats, setCoats] = useState(2);
+  const [ceiling, setCeiling] = useState(false);
+  const [rooms, setRooms] = useState(1);
+  const [finishId, setFinishId] = useState('emulsion');
 
-  const products = useMemo(() => {
-    let list = PRODUCTS.filter((p) => p.category === 'Paint');
-    if (selectedType !== 'All') {
-      list = list.filter((p) => p.name.toLowerCase().includes(selectedType.toLowerCase()));
-    }
-    return list;
-  }, [selectedType]);
-
-  const paintNeeded = useMemo(() => {
-    const l = parseFloat(wallLength);
-    const h = parseFloat(wallHeight);
-    const c = parseInt(coats) || 1;
-    if (isNaN(l) || isNaN(h) || l <= 0 || h <= 0) return 0;
-    const area = l * h;
-    const litres = (area * c) / 12;
-    return Math.ceil(litres * 10) / 10;
-  }, [wallLength, wallHeight, coats]);
+  const finish = FINISHES.find((f) => f.id === finishId)!;
+  const one = paint(parseFloat(length), parseFloat(width), parseFloat(height), doors, windows, coats, ceiling, finish.rate);
+  const litres = one ? one.litres * rooms : 0;
+  const buckets = Math.ceil(litres / 20);
+  const product = PRODUCTS.find((p) => p.category === 'Paint' && p.name.toLowerCase().includes(finishId));
 
   return (
-    <View style={styles.container}>
-      <KeyboardAwareWrapper showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: insets.bottom + 20 }}>
-        <LinearGradient colors={[Colors.secondary, Colors.secondaryContainer]} style={styles.header}>
-          <View style={styles.headerContent}>
-            <Text style={styles.headerEmoji}>🎨</Text>
-            <Text style={styles.headerTitle}>Paint</Text>
-            <Text style={styles.headerSub}>Quality paints, primers, and finishes for every surface</Text>
-            <View style={styles.trustRow}>
-              <View style={styles.trustItem}>
-                <MaterialIcons name="verified" size={14} color={Colors.orangeTint} />
-                <Text style={styles.trustText}>Premium Finish</Text>
-              </View>
-              <View style={styles.trustItem}>
-                <MaterialIcons name="eco" size={14} color={Colors.orangeTint} />
-                <Text style={styles.trustText}>Low VOC</Text>
-              </View>
-            </View>
-          </View>
-          <View style={[styles.shape, styles.shape1]} />
-          <View style={[styles.shape, styles.shape2]} />
-        </LinearGradient>
+    <CategoryShell
+      title="Paint"
+      category="Paint"
+      emoji="🎨"
+      heroTitle="Paint every room, no half-empty buckets"
+      heroSub="Measure once — we take off doors and windows and size it in buckets."
+      trust={[['verified', 'Genuine brands'], ['local-shipping', 'Fast delivery'], ['palette', 'Any colour']]}
+      estimatorTitle="Paint calculator"
+      tips={[
+        { icon: 'format-paint', title: 'Prime new walls', text: 'New plaster soaks up paint. One coat of primer or thinned emulsion first saves paint on the top coats.' },
+        { icon: 'palette', title: 'Mix buckets together', text: 'Pour all buckets of one colour into a big container and stir — this hides small shade differences.' },
+        { icon: 'event', title: 'Check the date', text: 'Old emulsion goes lumpy and smells. Check the production date and that the lid seal is unbroken.' },
+      ]}
+      hire={{ title: 'Need a painter?', sub: 'Hire a vetted painter for inside or outside', icon: 'format-paint' }}
+    >
+      <Label>Paint type</Label>
+      <Wrap>{FINISHES.map((f) => <Chip key={f.id} label={f.label} active={finishId === f.id} onPress={() => setFinishId(f.id)} />)}</Wrap>
+      <Row>
+        <Field label="Room length (m)" placeholder="4" keyboardType="decimal-pad" value={length} onChangeText={numeric(setLength)} />
+        <Field label="Room width (m)" placeholder="4" keyboardType="decimal-pad" value={width} onChangeText={numeric(setWidth)} />
+        <Field label="Height (m)" placeholder="3" keyboardType="decimal-pad" value={height} onChangeText={numeric(setHeight)} />
+      </Row>
+      <Row>
+        <Stepper label="Doors" value={doors} onChange={setDoors} />
+        <Stepper label="Windows" value={windows} onChange={setWindows} />
+        <Stepper label="Same rooms" value={rooms} onChange={setRooms} min={1} />
+      </Row>
+      <Label>Coats</Label>
+      <Wrap>{[1, 2, 3].map((c) => <Chip key={c} label={`${c} coat${c > 1 ? 's' : ''}`} active={coats === c} onPress={() => setCoats(c)} />)}</Wrap>
+      <Wrap last>
+        <Chip label="Walls only" active={!ceiling} onPress={() => setCeiling(false)} />
+        <Chip label="Walls + ceiling" active={ceiling} onPress={() => setCeiling(true)} />
+      </Wrap>
 
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Paint Type</Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipScroll}>
-            {PAINT_TYPES.map((t) => (
-              <TouchableOpacity key={t.name} style={[styles.chip, selectedType === t.name && styles.chipActive]} onPress={() => setSelectedType(t.name)}>
-                <Text style={styles.chipIcon}>{t.icon}</Text>
-                <Text style={[styles.chipText, selectedType === t.name && styles.chipTextActive]}>{t.name}</Text>
-              </TouchableOpacity>
-            ))}
-          </ScrollView>
-        </View>
-
-        <View style={styles.section}>
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Bulk Deals</Text>
-            <Text style={styles.saveTag}>SAVE</Text>
-          </View>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.dealScroll}>
-            {PAINT_DEALS.map((d) => (
-              <TouchableOpacity key={d.id} style={styles.dealCard}>
-                <View style={styles.dealBadge}><Text style={styles.dealBadgeText}>{d.discount}</Text></View>
-                <Text style={styles.dealTitle}>{d.title}</Text>
-                <Text style={styles.dealQty}>{d.qty}</Text>
-                <Text style={styles.dealPrice}>{d.price}</Text>
-                <View style={styles.dealAction}>
-                  <Text style={styles.dealActionText}>View Deal</Text>
-                  <MaterialIcons name="arrow-forward" size={14} color={Colors.primary} />
-                </View>
-              </TouchableOpacity>
-            ))}
-          </ScrollView>
-        </View>
-
-        <View style={styles.section}>
-          <View style={styles.calcCard}>
-            <LinearGradient colors={['#f8f9fa', '#ffffff']} style={styles.calcInner}>
-              <View style={styles.calcHeader}>
-                <MaterialIcons name="format-paint" size={24} color={Colors.secondary} />
-                <Text style={styles.calcTitle}>Paint Calculator</Text>
-              </View>
-              <Text style={styles.calcSub}>Estimate paint needed for your walls</Text>
-              <View style={styles.calcInputRow}>
-                <View style={styles.calcInputGroup}>
-                  <Text style={styles.calcInputLabel}>Wall Length (m)</Text>
-                  <TextInput style={styles.calcInput} placeholder="e.g. 12" keyboardType="numeric" value={wallLength} onChangeText={setWallLength} />
-                </View>
-                <View style={styles.calcInputGroup}>
-                  <Text style={styles.calcInputLabel}>Wall Height (m)</Text>
-                  <TextInput style={styles.calcInput} placeholder="e.g. 3" keyboardType="numeric" value={wallHeight} onChangeText={setWallHeight} />
-                </View>
-                <View style={styles.calcInputGroup}>
-                  <Text style={styles.calcInputLabel}>Coats</Text>
-                  <TextInput style={styles.calcInput} placeholder="2" keyboardType="numeric" value={coats} onChangeText={setCoats} />
-                </View>
-              </View>
-              {paintNeeded > 0 && (
-                <View style={styles.resultArea}>
-                  <Text style={styles.resultLabel}>Paint Required:</Text>
-                  <Text style={styles.resultValue}>{paintNeeded} litres</Text>
-                  <Text style={styles.resultNote}>*Based on 12m² coverage per litre per coat</Text>
-                </View>
-              )}
-            </LinearGradient>
-          </View>
-        </View>
-
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Available Products</Text>
-          <View style={styles.productList}>
-            {products.length > 0 ? products.map((p) => (
-              <ProductCard key={p.id} product={p} horizontal onPress={() => router.push(`/product/${p.id}`)} onAddToCart={() => addItem(p)} />
-            )) : (
-              <View style={styles.empty}><Text style={styles.emptyIcon}>🎨</Text><Text style={styles.emptyText}>No products yet</Text></View>
-            )}
-          </View>
-        </View>
-      </KeyboardAwareWrapper>
-    </View>
+      {one ? (
+        <Result label="You need about" value={litres.toFixed(1)} unit="litres" metrics={[[`${buckets}`, '20 L buckets'], [`${Math.ceil(litres / 4)}`, 'or 4 L tins'], [`${(one.area * rooms).toFixed(0)} m²`, 'Surface to paint']]}>
+          <OrderLine product={product} qty={buckets} what="buckets" missingText={`${finish.label} paint isn't sold on BuildLinka yet — share this list with a paint dealer.`} />
+          <Footnote>{finish.label} covers about {finish.rate} m² per litre per coat. Rough or new walls can take 20% more.</Footnote>
+        </Result>
+      ) : (
+        <EmptyResult text="Enter the room's length, width and height." />
+      )}
+    </CategoryShell>
   );
 }
-
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: Colors.background },
-  header: { height: 220, padding: 24, paddingTop: 40, overflow: 'hidden', justifyContent: 'center' },
-  headerContent: { zIndex: 2 },
-  headerEmoji: { fontSize: 48, marginBottom: 8 },
-  headerTitle: { fontSize: 28, fontWeight: '900', color: '#fff' },
-  headerSub: { fontSize: 14, color: 'rgba(255,255,255,0.85)', marginTop: 4 },
-  trustRow: { flexDirection: 'row', gap: 16, marginTop: 16 },
-  trustItem: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(255,255,255,0.15)', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 99 },
-  trustText: { color: '#fff', fontSize: 11, fontWeight: '600' },
-  shape: { position: 'absolute', borderRadius: 999, backgroundColor: 'rgba(255,255,255,0.08)' },
-  shape1: { width: 200, height: 200, top: -50, right: -50 },
-  shape2: { width: 150, height: 150, bottom: -30, left: -20 },
-  section: { marginTop: 24, paddingHorizontal: 20 },
-  sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
-  sectionTitle: { fontSize: 17, fontWeight: '800', color: Colors.textDark, marginBottom: 12 },
-  saveTag: { backgroundColor: Colors.secondary, color: '#fff', fontSize: 10, fontWeight: '900', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 4 },
-  chipScroll: { gap: 10 },
-  chip: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: Colors.card, paddingHorizontal: 16, paddingVertical: 10, borderRadius: 8, borderWidth: 1, borderColor: Colors.outlineVariant },
-  chipActive: { backgroundColor: Colors.secondary, borderColor: Colors.secondary },
-  chipIcon: { fontSize: 18 },
-  chipText: { fontSize: 13, fontWeight: '600', color: Colors.textMedium },
-  chipTextActive: { color: '#fff' },
-  dealScroll: { gap: 12 },
-  dealCard: { width: 160, backgroundColor: Colors.card, borderRadius: 8, padding: 16, borderLeftWidth: 4, borderLeftColor: Colors.primary, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 },
-  dealBadge: { backgroundColor: Colors.secondaryContainer, alignSelf: 'flex-start', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, marginBottom: 8 },
-  dealBadgeText: { fontSize: 10, fontWeight: '800', color: Colors.onSecondaryContainer },
-  dealTitle: { fontSize: 14, fontWeight: '700', color: Colors.textDark },
-  dealQty: { fontSize: 12, color: Colors.textMedium, marginTop: 2 },
-  dealPrice: { fontSize: 16, fontWeight: '800', color: Colors.secondary, marginTop: 8 },
-  dealAction: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 10 },
-  dealActionText: { fontSize: 11, fontWeight: '700', color: Colors.primary },
-  calcCard: { borderRadius: 8, overflow: 'hidden', borderWidth: 1, borderColor: Colors.outlineVariant, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 },
-  calcInner: { padding: 18 },
-  calcHeader: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 4 },
-  calcTitle: { fontSize: 16, fontWeight: '800', color: Colors.textDark },
-  calcSub: { fontSize: 12, color: Colors.textMedium, marginBottom: 16 },
-  calcInputRow: { flexDirection: 'row', gap: 12 },
-  calcInputGroup: { flex: 1, gap: 6 },
-  calcInputLabel: { fontSize: 11, fontWeight: '700', color: Colors.textLight },
-  calcInput: { backgroundColor: Colors.card, borderWidth: 1, borderColor: Colors.outlineVariant, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8, fontSize: 14, color: Colors.textDark },
-  resultArea: { marginTop: 18, paddingTop: 16, borderTopWidth: 1, borderTopColor: Colors.outlineVariant, alignItems: 'center' },
-  resultLabel: { fontSize: 12, fontWeight: '600', color: Colors.textMedium },
-  resultValue: { fontSize: 24, fontWeight: '900', color: Colors.secondary, marginTop: 4 },
-  resultNote: { fontSize: 10, color: Colors.textMuted, marginTop: 6 },
-  productList: { gap: 12, marginTop: 8 },
-  empty: { alignItems: 'center', paddingVertical: 40, gap: 8 },
-  emptyIcon: { fontSize: 40 },
-  emptyText: { fontSize: 13, color: Colors.textLight },
-});

@@ -1,186 +1,195 @@
-import { useState } from 'react';
-import {
-  View,
-  Text,
-  ScrollView,
-  StyleSheet,
-  TouchableOpacity,
-  Alert,
-} from 'react-native';
-import { Stack, useRouter } from 'expo-router';
+import { useMemo, useState } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, TextInput, ScrollView } from 'react-native';
+import { Stack, useLocalSearchParams } from 'expo-router';
 import { MaterialIcons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import KeyboardAwareWrapper from '../components/KeyboardAwareWrapper';
 import { Colors } from '../constants/Colors';
+import { useEngineer, type Spec, type SpecStatus } from '../contexts/EngineerContext';
+import { SPEC_STATUS, Chip, Field, Pill, PrimaryButton, Sheet, timeAgo, ui } from '../components/EngineerUI';
 
-const SPECS = [
-  {
-    id: 'sp1',
-    name: 'Structural Steel Specs',
-    project: 'Greenview Estate',
-    type: 'Structural',
-    sheets: 12,
-    updated: '2 days ago',
-    status: 'approved',
-  },
-  {
-    id: 'sp2',
-    name: 'Foundation Design',
-    project: 'Ikeja Mall Complex',
-    type: 'Geotechnical',
-    sheets: 8,
-    updated: '1 week ago',
-    status: 'review',
-  },
-  {
-    id: 'sp3',
-    name: 'Reinforcement Schedule',
-    project: 'Lekki Bridge Access Rd',
-    type: 'Structural',
-    sheets: 16,
-    updated: '3 days ago',
-    status: 'approved',
-  },
-  {
-    id: 'sp4',
-    name: 'MEP Specifications',
-    project: 'Ikeja Mall Complex',
-    type: 'MEP',
-    sheets: 24,
-    updated: '5 days ago',
-    status: 'draft',
-  },
-  {
-    id: 'sp5',
-    name: 'Concrete Mix Design',
-    project: 'Abuja Mall Renovation',
-    type: 'Materials',
-    sheets: 6,
-    updated: '1 day ago',
-    status: 'approved',
-  },
-  {
-    id: 'sp6',
-    name: 'Steel Connection Details',
-    project: 'Greenview Estate',
-    type: 'Structural',
-    sheets: 10,
-    updated: '2 weeks ago',
-    status: 'review',
-  },
-];
+const TYPES = ['Structural', 'Geotechnical', 'MEP', 'Materials', 'Architectural'];
 
-const STATUS_META: Record<string, { label: string; icon: string; color: string }> = {
-  approved: { label: 'Approved', icon: 'check-circle', color: Colors.success },
-  review: { label: 'In Review', icon: 'hourglass-top', color: Colors.warning },
-  draft: { label: 'Draft', icon: 'edit', color: Colors.textMuted },
+// What each status can move to, and the button label for it.
+const NEXT: Record<SpecStatus, { to: SpecStatus; label: string; icon: string }[]> = {
+  draft: [{ to: 'review', label: 'Submit for review', icon: 'send' }],
+  review: [{ to: 'approved', label: 'Approve', icon: 'check' }, { to: 'draft', label: 'Send back to draft', icon: 'undo' }],
+  approved: [{ to: 'review', label: 'Reopen for review', icon: 'refresh' }],
 };
 
 export default function SpecificationsScreen() {
-  const router = useRouter();
   const insets = useSafeAreaInsets();
-  const [filter, setFilter] = useState<string | null>(null);
+  const params = useLocalSearchParams<{ project?: string; status?: string; new?: string }>();
+  const { specs, projects, addSpec, setSpecStatus } = useEngineer();
+  const [search, setSearch] = useState('');
+  const [status, setStatus] = useState<'all' | SpecStatus>(params.status && params.status in SPEC_STATUS ? (params.status as SpecStatus) : 'all');
+  const [projectFilter, setProjectFilter] = useState(params.project ?? 'all');
+  const [openId, setOpenId] = useState<string | null>(null);
+  const [adding, setAdding] = useState(params.new === '1');
+  const [draft, setDraft] = useState({ name: '', projectId: params.project ?? '', type: 'Structural', sheets: '' });
 
-  const types = [...new Set(SPECS.map((s) => s.type))];
-  const filtered = filter ? SPECS.filter((s) => s.type === filter) : SPECS;
+  const projectName = (id: string) => projects.find((p) => p.id === id)?.name ?? 'Unknown project';
+  const q = search.trim().toLowerCase();
+
+  const filtered = useMemo(
+    () => specs.filter((s) =>
+      (status === 'all' || s.status === status)
+      && (projectFilter === 'all' || s.projectId === projectFilter)
+      && (!q || `${s.name} ${s.type} ${projectName(s.projectId)}`.toLowerCase().includes(q))),
+    [specs, status, projectFilter, q, projects]
+  );
+
+  const open: Spec | undefined = specs.find((s) => s.id === openId);
+  const canAdd = draft.name.trim() && draft.projectId && Number(draft.sheets) > 0;
+
+  const add = () => {
+    if (!canAdd) return;
+    addSpec({ name: draft.name.trim(), projectId: draft.projectId, type: draft.type, sheets: Number(draft.sheets) });
+    setDraft({ name: '', projectId: params.project ?? '', type: 'Structural', sheets: '' });
+    setAdding(false);
+  };
+
+  const footer = (
+    <View style={[styles.footer, { paddingBottom: Math.max(16, insets.bottom + 8) }]}>
+      <PrimaryButton label="Add specification" icon="note-add" onPress={() => setAdding(true)} style={{ marginTop: 12 }} />
+    </View>
+  );
 
   return (
     <View style={styles.container}>
-      <Stack.Screen options={{ headerShown: false }} />
-      <LinearGradient
-        colors={[Colors.tertiary, '#524000', Colors.tertiaryContainer]}
-        style={[styles.header, { paddingTop: insets.top }]}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-      >
-        <View style={styles.headerRow}>
-          <TouchableOpacity style={styles.backBtn} onPress={() => router.back()} activeOpacity={0.7}>
-            <MaterialIcons name="arrow-back" size={20} color="#fff" />
-          </TouchableOpacity>
-          <View style={styles.headerTitleArea}>
-            <Text style={styles.headerTitle}>Specifications</Text>
-            <Text style={styles.headerSub}>{SPECS.length} documents</Text>
-          </View>
-          <MaterialIcons name="description" size={22} color="rgba(255,255,255,0.5)" />
-        </View>
-      </LinearGradient>
+      <Stack.Screen options={{ headerShown: true, headerTitle: 'Specifications', headerShadowVisible: false, headerStyle: { backgroundColor: Colors.background }, headerTintColor: Colors.primary }} />
 
-      <ScrollView contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 32 }]} showsVerticalScrollIndicator={false}>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>
-          <TouchableOpacity style={[styles.filterChip, !filter && styles.filterChipActive]} onPress={() => setFilter(null)} activeOpacity={0.7}>
-            <Text style={[styles.filterChipText, !filter && styles.filterChipTextActive]}>All</Text>
-          </TouchableOpacity>
-          {types.map((t) => (
-            <TouchableOpacity key={t} style={[styles.filterChip, filter === t && styles.filterChipActive]} onPress={() => setFilter(t)} activeOpacity={0.7}>
-              <Text style={[styles.filterChipText, filter === t && styles.filterChipTextActive]}>{t}</Text>
+      <KeyboardAwareWrapper contentContainerStyle={styles.content} footer={footer}>
+        <View style={styles.searchBar}>
+          <MaterialIcons name="search" size={20} color={Colors.outline} />
+          <TextInput style={styles.searchInput} placeholder="Search specs, types, projects" placeholderTextColor={Colors.outline} value={search} onChangeText={setSearch} />
+          {search.length > 0 && (
+            <TouchableOpacity onPress={() => setSearch('')} hitSlop={8}>
+              <MaterialIcons name="close" size={18} color={Colors.outline} />
             </TouchableOpacity>
+          )}
+        </View>
+
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filters}>
+          {(['all', 'draft', 'review', 'approved'] as const).map((s) => (
+            <Chip
+              key={s}
+              label={`${s === 'all' ? 'All' : SPEC_STATUS[s].label} ${s === 'all' ? specs.length : specs.filter((x) => x.status === s).length}`}
+              active={status === s}
+              onPress={() => setStatus(s)}
+            />
           ))}
         </ScrollView>
 
-        {filtered.map((spec) => {
-          const status = STATUS_META[spec.status];
+        {projectFilter !== 'all' && (
+          <TouchableOpacity style={styles.projectBanner} onPress={() => setProjectFilter('all')} activeOpacity={0.7}>
+            <MaterialIcons name="business" size={18} color={Colors.primary} />
+            <Text style={styles.projectBannerText} numberOfLines={1}>{projectName(projectFilter)}</Text>
+            <MaterialIcons name="close" size={18} color={Colors.primary} />
+          </TouchableOpacity>
+        )}
+
+        {filtered.map((s) => {
+          const meta = SPEC_STATUS[s.status];
           return (
-            <TouchableOpacity key={spec.id} style={styles.specCard} activeOpacity={0.7} onPress={() => Alert.alert(spec.name, `Project: ${spec.project}\nType: ${spec.type}\nSheets: ${spec.sheets}\nUpdated: ${spec.updated}\nStatus: ${status.label}`)}>
-              <View style={styles.specTop}>
-                <View style={[styles.specIcon, { backgroundColor: Colors.tertiary + '18' }]}>
-                  <MaterialIcons name="description" size={20} color={Colors.tertiary} />
-                </View>
-                <View style={styles.specInfo}>
-                  <Text style={styles.specName}>{spec.name}</Text>
-                  <Text style={styles.specProject}>{spec.project}</Text>
-                </View>
-                <View style={[styles.statusBadge, { backgroundColor: status.color + '15' }]}>
-                  <MaterialIcons name={status.icon as any} size={11} color={status.color} />
-                  <Text style={[styles.statusText, { color: status.color }]}>{status.label}</Text>
-                </View>
+            <TouchableOpacity key={s.id} style={[ui.card, styles.row]} onPress={() => setOpenId(s.id)} activeOpacity={0.7}>
+              <View style={styles.docIcon}>
+                <MaterialIcons name="description" size={22} color={Colors.tertiary} />
               </View>
-              <View style={styles.specMeta}>
-                <View style={styles.specMetaItem}>
-                  <MaterialIcons name="article" size={12} color={Colors.textLight} />
-                  <Text style={styles.specMetaText}>{spec.sheets} sheets</Text>
-                </View>
-                <View style={styles.specMetaDot} />
-                <View style={styles.specMetaItem}>
-                  <MaterialIcons name="schedule" size={12} color={Colors.textLight} />
-                  <Text style={styles.specMetaText}>{spec.updated}</Text>
-                </View>
+              <View style={styles.flex}>
+                <Text style={styles.name}>{s.name}</Text>
+                <Text style={styles.sub} numberOfLines={1}>{projectName(s.projectId)}</Text>
+                <Text style={styles.meta}>{s.type} · {s.sheets} sheets · {timeAgo(s.updatedAt)}</Text>
               </View>
+              <Pill {...meta} />
             </TouchableOpacity>
           );
         })}
-      </ScrollView>
+
+        {filtered.length === 0 && (
+          <View style={styles.empty}>
+            <MaterialIcons name="description" size={36} color={Colors.outline} />
+            <Text style={styles.emptyTitle}>No specifications</Text>
+            <Text style={styles.emptySub}>Change the filters or add a new spec.</Text>
+          </View>
+        )}
+      </KeyboardAwareWrapper>
+
+      <Sheet visible={!!open} title={open?.name ?? ''} onClose={() => setOpenId(null)}>
+        {open && (
+          <>
+            <Pill {...SPEC_STATUS[open.status]} />
+            <View style={styles.detailGrid}>
+              {[
+                ['Project', projectName(open.projectId)],
+                ['Type', open.type],
+                ['Sheets', String(open.sheets)],
+                ['Last updated', timeAgo(open.updatedAt)],
+              ].map(([k, v]) => (
+                <View key={k} style={styles.detailRow}>
+                  <Text style={styles.detailKey}>{k}</Text>
+                  <Text style={styles.detailValue}>{v}</Text>
+                </View>
+              ))}
+            </View>
+            {NEXT[open.status].map((n, i) =>
+              i === 0 ? (
+                <PrimaryButton key={n.to} label={n.label} icon={n.icon} onPress={() => setSpecStatus(open.id, n.to)} />
+              ) : (
+                <TouchableOpacity key={n.to} style={styles.secondaryBtn} onPress={() => setSpecStatus(open.id, n.to)} activeOpacity={0.7}>
+                  <MaterialIcons name={n.icon as any} size={18} color={Colors.onSurfaceVariant} />
+                  <Text style={styles.secondaryText}>{n.label}</Text>
+                </TouchableOpacity>
+              )
+            )}
+          </>
+        )}
+      </Sheet>
+
+      <Sheet visible={adding} title="New specification" onClose={() => setAdding(false)}>
+        <Field label="Name" placeholder="e.g. Roof Truss Details" value={draft.name} onChangeText={(name) => setDraft({ ...draft, name })} />
+        <Text style={ui.label}>Project</Text>
+        <View style={ui.wrap}>
+          {projects.map((p) => <Chip key={p.id} label={p.name} active={draft.projectId === p.id} onPress={() => setDraft({ ...draft, projectId: p.id })} />)}
+        </View>
+        <Text style={ui.label}>Type</Text>
+        <View style={ui.wrap}>
+          {TYPES.map((t) => <Chip key={t} label={t} active={draft.type === t} onPress={() => setDraft({ ...draft, type: t })} />)}
+        </View>
+        <Field label="Number of sheets" placeholder="e.g. 8" keyboardType="number-pad" value={draft.sheets} onChangeText={(t) => setDraft({ ...draft, sheets: t.replace(/\D/g, '') })} />
+        <PrimaryButton label="Save as draft" onPress={add} disabled={!canAdd} />
+      </Sheet>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
-  header: { paddingBottom: 16 },
-  headerRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, gap: 12, paddingTop: 4 },
-  backBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: 'rgba(255,255,255,0.15)', alignItems: 'center', justifyContent: 'center' },
-  headerTitleArea: { flex: 1 },
-  headerTitle: { fontSize: 18, fontWeight: '800', color: '#fff' },
-  headerSub: { fontSize: 12, color: 'rgba(255,255,255,0.7)', marginTop: 1 },
+  content: { padding: 16, paddingBottom: 24 },
+  flex: { flex: 1 },
 
-  content: { padding: 16, gap: 10 },
+  searchBar: { flexDirection: 'row', alignItems: 'center', gap: 8, height: 48, paddingHorizontal: 16, borderRadius: 8, borderWidth: 1, borderColor: Colors.outlineVariant, backgroundColor: Colors.card, marginBottom: 12 },
+  searchInput: { flex: 1, fontSize: 16, color: Colors.onSurface, paddingVertical: 0 },
+  filters: { gap: 8, paddingBottom: 12 },
+  projectBanner: { flexDirection: 'row', alignItems: 'center', gap: 8, alignSelf: 'flex-start', height: 36, paddingHorizontal: 12, borderRadius: 999, backgroundColor: Colors.greenTint, marginBottom: 12, maxWidth: '100%' },
+  projectBannerText: { fontSize: 14, fontWeight: '600', color: Colors.primary, flexShrink: 1 },
 
-  filterRow: { gap: 8, paddingBottom: 4 },
-  filterChip: { paddingHorizontal: 14, paddingVertical: 7, borderRadius: 99, backgroundColor: Colors.card, borderWidth: 1, borderColor: Colors.outlineVariant },
-  filterChipActive: { backgroundColor: Colors.tertiary, borderColor: Colors.tertiary },
-  filterChipText: { fontSize: 12, fontWeight: '600', color: Colors.textMedium },
-  filterChipTextActive: { color: '#fff' },
+  row: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  docIcon: { width: 44, height: 44, borderRadius: 8, backgroundColor: Colors.amberLight + '99', alignItems: 'center', justifyContent: 'center' },
+  name: { fontSize: 16, fontWeight: '600', color: Colors.onSurface },
+  sub: { fontSize: 14, color: Colors.onSurfaceVariant, marginTop: 1 },
+  meta: { fontSize: 12, color: Colors.outline, marginTop: 4 },
 
-  specCard: { backgroundColor: Colors.card, borderRadius: 14, padding: 16, gap: 10, borderLeftWidth: 3, borderLeftColor: Colors.tertiary, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 },
-  specTop: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  specIcon: { width: 40, height: 40, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
-  specInfo: { flex: 1 },
-  specName: { fontSize: 14, fontWeight: '700', color: Colors.textDark },
-  specProject: { fontSize: 11, color: Colors.textLight, marginTop: 1 },
-  statusBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, borderRadius: 99, paddingHorizontal: 8, paddingVertical: 3 },
-  statusText: { fontSize: 10, fontWeight: '700' },
+  empty: { alignItems: 'center', paddingVertical: 48, gap: 8 },
+  emptyTitle: { fontSize: 18, fontWeight: '600', color: Colors.onSurface },
+  emptySub: { fontSize: 14, color: Colors.outline },
 
-  specMeta: { flexDirection: 'row', alignItems: 'center', gap: 6, marginLeft: 52 },
-  specMetaItem: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  specMetaText: { fontSize: 11, color: Colors.textLight },
-  specMetaDot: { width: 3, height: 3, borderRadius: 2, backgroundColor: Colors.textMuted },
+  detailGrid: { marginTop: 16, borderRadius: 8, backgroundColor: Colors.background, paddingHorizontal: 16 },
+  detailRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: Colors.divider },
+  detailKey: { fontSize: 14, color: Colors.outline },
+  detailValue: { fontSize: 14, fontWeight: '600', color: Colors.onSurface, flexShrink: 1, textAlign: 'right', marginLeft: 16 },
+  secondaryBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, height: 48, borderRadius: 999, borderWidth: 1, borderColor: Colors.outlineVariant, marginTop: 12 },
+  secondaryText: { fontSize: 15, fontWeight: '600', color: Colors.onSurfaceVariant },
+
+  footer: { paddingHorizontal: 16, backgroundColor: Colors.card, borderTopWidth: 1, borderTopColor: Colors.divider },
 });

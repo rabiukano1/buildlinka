@@ -241,7 +241,7 @@ export default function WorkerDashboardScreen() {
             <MaterialIcons name="post-add" size={22} color={Colors.secondary} />
             <Text style={styles.quickActionText}>Create Work</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.quickAction} onPress={() => router.push('/nearby' as any)}>
+          <TouchableOpacity style={styles.quickAction} onPress={() => router.push('/nearby?tab=jobs' as any)}>
             <MaterialIcons name="near-me" size={22} color={Colors.secondary} />
             <Text style={styles.quickActionText}>Find Jobs</Text>
           </TouchableOpacity>

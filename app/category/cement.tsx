@@ -1,450 +1,308 @@
-import React, { useState, useMemo } from 'react';
-import {
-  View,
-  Text,
-  ScrollView,
-  StyleSheet,
-  TouchableOpacity,
-  TextInput,
-  Dimensions,
-  Image,
-} from 'react-native';
-import { Stack, useRouter } from 'expo-router';
+import { useMemo, useState } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, Alert } from 'react-native';
+import { useRouter } from 'expo-router';
 import { MaterialIcons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors } from '../../constants/Colors';
-import { PRODUCTS, type Product } from '../../constants/MockData';
+import { PRODUCTS } from '../../constants/MockData';
 import { useCart } from '../../contexts/CartContext';
+import { useSaved } from '../../contexts/SavedItemsContext';
 import ProductCard from '../../components/ProductCard';
 import KeyboardAwareWrapper from '../../components/KeyboardAwareWrapper';
+import { CategoryHeader } from '../../components/CategoryShell';
+import { Chip, Field } from '../../components/EngineerUI';
+import { estimateCement, MIXES } from '../../lib/cementEstimate';
 
-const { width } = Dimensions.get('window');
+const formatPrice = (n: number) => '₦' + Math.round(n).toLocaleString('en-NG');
 
-const BRANDS = [
-  { name: 'Dangote', emoji: '🏗️', color: '#1B5E20' },
-  { name: 'BUA', emoji: '🏗️', color: '#BF360C' },
-  { name: 'Elephant', emoji: '🏗️', color: '#1565C0' },
-  { name: 'Ibeto', emoji: '🏗️', color: '#6A1B9A' },
+const JOBS = [
+  { id: 'slab', label: 'Floor / slab', icon: 'foundation', dims: ['Length (m)', 'Width (m)'], thickness: [100, 125, 150], hint: 'Concrete for floors, slabs and decking' },
+  { id: 'screed', label: 'Screed', icon: 'layers', dims: ['Length (m)', 'Width (m)'], thickness: [25, 50, 75], hint: 'Smooth 1:4 topping before tiles' },
+  { id: 'plaster', label: 'Plaster', icon: 'format-paint', dims: ['Wall length (m)', 'Wall height (m)'], thickness: [12, 15, 20], hint: '1:6 rendering for walls' },
+] as const;
+type JobId = (typeof JOBS)[number]['id'];
+
+const CONCRETE_MIXES = [
+  { id: 'm15', label: '1:2:4 (M15)', note: 'Floors, blinding' },
+  { id: 'm20', label: '1:1.5:3 (M20)', note: 'Slabs, beams, columns' },
+] as const;
+
+const TIPS = [
+  { icon: 'event', title: 'Check the date', text: 'Use cement within 3 months of the date on the bag. Older cement loses strength.' },
+  { icon: 'water-drop', title: 'Keep it dry', text: 'Stack bags on pallets, off the floor and away from walls, under a cover.' },
+  { icon: 'grade', title: '42.5R vs 32.5', text: '42.5R sets stronger and faster — best for slabs and columns. 32.5 is fine for blocks and plaster.' },
+  { icon: 'scale', title: 'Weigh a bag', text: 'A genuine bag is 50 kg. Underweight bags are a common scam on site.' },
 ];
 
-const BULK_DEALS = [
-  { id: 'b1', title: 'Trailer Load', bags: 600, discount: '15% Off', price: '₦4,800,000' },
-  { id: 'b2', title: 'Half Trailer', bags: 300, discount: '10% Off', price: '₦2,450,000' },
-  { id: 'b3', title: 'Wholesale Pack', bags: 100, discount: '5% Off', price: '₦820,000' },
-];
+// "Dangote Cement 42.5R (50kg)" → "Dangote"
+const brandOf = (name: string) => name.split(' ')[0];
 
 export default function CementCategoryScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { addItem } = useCart();
-  const [selectedBrand, setSelectedBrand] = useState('All');
-  const [area, setArea] = useState('');
-  const [thickness, setThickness] = useState('4'); // inches
+  const { isSaved, toggleSave } = useSaved();
 
-  const cementProducts = useMemo(() => {
-    let list = PRODUCTS.filter((p) => p.category === 'Cement');
-    if (selectedBrand !== 'All') {
-      list = list.filter((p) => p.name.includes(selectedBrand));
-    }
-    return list;
-  }, [selectedBrand]);
+  const cementProducts = useMemo(() => PRODUCTS.filter((p) => p.category === 'Cement').sort((a, b) => a.price - b.price), []);
+  const cheapestId = cementProducts.find((p) => p.inStock)?.id;
 
-  const bagsNeeded = useMemo(() => {
-    const numArea = parseFloat(area);
-    if (isNaN(numArea) || numArea <= 0) return 0;
-    // Rough estimation: 1 bag for ~4-5 sqm at 4-inch thickness
-    const factor = (parseFloat(thickness) / 4) * 0.22;
-    return Math.ceil(numArea * factor);
-  }, [area, thickness]);
+  const [jobId, setJobId] = useState<JobId>('slab');
+  const [mixId, setMixId] = useState<'m15' | 'm20'>('m15');
+  const [length, setLength] = useState('');
+  const [width, setWidth] = useState('');
+  const [thickness, setThickness] = useState<number>(100);
+  const [waste, setWaste] = useState(5);
+  const [productId, setProductId] = useState(cheapestId ?? cementProducts[0]?.id);
+  const [openTip, setOpenTip] = useState<number | null>(0);
+
+  const job = JOBS.find((j) => j.id === jobId)!;
+  const product = cementProducts.find((p) => p.id === productId);
+  const mix = jobId === 'slab' ? MIXES[mixId] : MIXES[jobId];
+  const estimate = estimateCement(parseFloat(length), parseFloat(width), thickness, mix, waste);
+
+  const pickJob = (id: JobId) => {
+    setJobId(id);
+    setThickness(JOBS.find((j) => j.id === id)!.thickness[1]);
+  };
+
+  const addEstimate = () => {
+    if (!estimate || !product) return;
+    addItem(product, estimate.bags);
+    Alert.alert('Added to cart', `${estimate.bags} bags of ${product.name}`, [
+      { text: 'Keep browsing', style: 'cancel' },
+      { text: 'View cart', onPress: () => router.push('/cart' as any) },
+    ]);
+  };
 
   return (
     <View style={styles.container}>
-      <KeyboardAwareWrapper showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: insets.bottom + 20 }}>
-        {/* ─── Modern Header ─── */}
-        <LinearGradient
-          colors={[Colors.primary, Colors.primaryContainer]}
-          style={styles.header}
-        >
-          <View style={styles.headerContent}>
-            <Text style={styles.headerEmoji}>🏗️</Text>
-            <Text style={styles.headerTitle}>Premium Cement</Text>
-            <Text style={styles.headerSub}>Quality verified supply for all project sizes</Text>
-            <View style={styles.trustRow}>
-              <View style={styles.trustItem}>
-                <MaterialIcons name="verified" size={14} color={Colors.greenTint} />
-                <Text style={styles.trustText}>Verified Quality</Text>
+      <KeyboardAwareWrapper contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 32 }]}>
+        <CategoryHeader title='Cement Supply' emoji='🏗️' heroTitle='Order the right number of bags' heroSub='Estimate cement, sand and gravel for your job, compare brands, then order.' trust={[['verified', 'Genuine 50 kg'], ['local-shipping', 'Site delivery'], ['savings', 'Best price']]} />
+
+        <Text style={styles.sectionTitle}>Compare brands</Text>
+        {cementProducts.map((p) => {
+          const active = p.id === productId;
+          return (
+            <TouchableOpacity key={p.id} style={[styles.brandCard, active && styles.brandCardActive]} onPress={() => setProductId(p.id)} activeOpacity={0.8} accessibilityState={{ selected: active }}>
+              <View style={styles.brandLogo}>
+                <Text style={styles.brandInitial}>{brandOf(p.name)[0]}</Text>
               </View>
-              <View style={styles.trustItem}>
-                <MaterialIcons name="local-shipping" size={14} color={Colors.greenTint} />
-                <Text style={styles.trustText}>Fast Delivery</Text>
+              <View style={styles.flex}>
+                <View style={styles.brandNameRow}>
+                  <Text style={styles.brandName}>{brandOf(p.name)}</Text>
+                  {p.id === cheapestId && cementProducts.length > 1 && (
+                    <View style={styles.cheapest}>
+                      <Text style={styles.cheapestText}>Lowest price</Text>
+                    </View>
+                  )}
+                </View>
+                <Text style={styles.brandSub} numberOfLines={1}>{p.name.replace(brandOf(p.name) + ' ', '')}</Text>
+                <Text style={styles.brandMeta}>★ {p.rating} ({p.reviewCount}) · {p.vendor}</Text>
               </View>
+              <View style={styles.brandRight}>
+                <Text style={styles.brandPrice}>{formatPrice(p.price)}</Text>
+                <Text style={styles.brandUnit}>per bag</Text>
+                <MaterialIcons name={active ? 'radio-button-checked' : 'radio-button-unchecked'} size={22} color={active ? Colors.primary : Colors.outlineVariant} />
+              </View>
+            </TouchableOpacity>
+          );
+        })}
+
+        <Text style={[styles.sectionTitle, styles.sectionGap]}>Bag estimator</Text>
+        <View style={styles.card}>
+          <View style={styles.jobRow}>
+            {JOBS.map((j) => {
+              const active = j.id === jobId;
+              return (
+                <TouchableOpacity key={j.id} style={[styles.job, active && styles.jobActive]} onPress={() => pickJob(j.id)} activeOpacity={0.7}>
+                  <MaterialIcons name={j.icon as any} size={24} color={active ? Colors.primary : Colors.onSurfaceVariant} />
+                  <Text style={[styles.jobText, active && styles.jobTextActive]}>{j.label}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+          <Text style={styles.jobHint}>{job.hint}</Text>
+
+          {jobId === 'slab' && (
+            <>
+              <Text style={styles.label}>Mix</Text>
+              <View style={styles.wrap}>
+                {CONCRETE_MIXES.map((m) => <Chip key={m.id} label={m.label} active={mixId === m.id} onPress={() => setMixId(m.id)} />)}
+              </View>
+              <Text style={styles.mixNote}>{CONCRETE_MIXES.find((m) => m.id === mixId)!.note}</Text>
+            </>
+          )}
+
+          <View style={styles.split}>
+            <View style={styles.flex}>
+              <Field label={job.dims[0]} placeholder="10" keyboardType="decimal-pad" value={length} onChangeText={(t) => setLength(t.replace(/[^0-9.]/g, ''))} />
+            </View>
+            <View style={styles.flex}>
+              <Field label={job.dims[1]} placeholder={jobId === 'plaster' ? '3' : '8'} keyboardType="decimal-pad" value={width} onChangeText={(t) => setWidth(t.replace(/[^0-9.]/g, ''))} />
             </View>
           </View>
-          {/* Decorative shapes */}
-          <View style={[styles.shape, styles.shape1]} />
-          <View style={[styles.shape, styles.shape2]} />
-        </LinearGradient>
 
-        {/* ─── Brand Highlights ─── */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Top Brands</Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.brandScroll}>
-            <TouchableOpacity
-              style={[styles.brandCard, selectedBrand === 'All' && styles.brandCardActive]}
-              onPress={() => setSelectedBrand('All')}
-            >
-              <Text style={[styles.brandName, selectedBrand === 'All' && styles.brandNameActive]}>All Brands</Text>
-            </TouchableOpacity>
-            {BRANDS.map((brand) => (
-              <TouchableOpacity
-                key={brand.name}
-                style={[styles.brandCard, selectedBrand === brand.name && styles.brandCardActive]}
-                onPress={() => setSelectedBrand(brand.name)}
-              >
-                <Text style={styles.brandEmoji}>{brand.emoji}</Text>
-                <Text style={[styles.brandName, selectedBrand === brand.name && styles.brandNameActive]}>{brand.name}</Text>
-              </TouchableOpacity>
-            ))}
-          </ScrollView>
-        </View>
-
-        {/* ─── Bulk Deals ─── */}
-        <View style={styles.section}>
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Bulk Buying Deals</Text>
-            <Text style={styles.saveTag}>SAVE BIG</Text>
+          <Text style={styles.label}>Thickness</Text>
+          <View style={styles.wrap}>
+            {job.thickness.map((t) => <Chip key={t} label={`${t} mm`} active={thickness === t} onPress={() => setThickness(t)} />)}
           </View>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.bulkScroll}>
-            {BULK_DEALS.map((deal) => (
-              <TouchableOpacity key={deal.id} style={styles.bulkCard}>
-                <View style={styles.bulkBadge}>
-                  <Text style={styles.bulkBadgeText}>{deal.discount}</Text>
-                </View>
-                <Text style={styles.bulkTitle}>{deal.title}</Text>
-                <Text style={styles.bulkBags}>{deal.bags} Bags</Text>
-                <Text style={styles.bulkPrice}>{deal.price}</Text>
-                <View style={styles.bulkAction}>
-                  <Text style={styles.bulkActionText}>View Deal</Text>
-                  <MaterialIcons name="arrow-forward" size={14} color={Colors.primary} />
-                </View>
-              </TouchableOpacity>
-            ))}
-          </ScrollView>
-        </View>
+          <Text style={styles.label}>Extra for spillage</Text>
+          <View style={[styles.wrap, styles.noMargin]}>
+            {[0, 5, 10].map((w) => <Chip key={w} label={`${w}%`} active={waste === w} onPress={() => setWaste(w)} />)}
+          </View>
 
-        {/* ─── Bag Calculator ─── */}
-        <View style={styles.section}>
-          <View style={styles.calcCard}>
-            <LinearGradient
-              colors={['#f8f9fa', '#ffffff']}
-              style={styles.calcInner}
-            >
-              <View style={styles.calcHeader}>
-                <MaterialIcons name="calculate" size={24} color={Colors.primary} />
-                <Text style={styles.calcTitle}>Cement Bag Calculator</Text>
+          {estimate ? (
+            <View style={styles.result}>
+              <Text style={styles.resultLabel}>You need about</Text>
+              <Text style={styles.resultBig}>{estimate.bags.toLocaleString('en-NG')} <Text style={styles.resultUnit}>bags of cement</Text></Text>
+              <View style={styles.metrics}>
+                <View style={styles.metric}>
+                  <Text style={styles.metricValue}>{estimate.volume.toFixed(2)} m³</Text>
+                  <Text style={styles.metricLabel}>{jobId === 'slab' ? 'Concrete' : 'Mortar'}</Text>
+                </View>
+                <View style={styles.metric}>
+                  <Text style={styles.metricValue}>{estimate.sandT.toFixed(1)} t</Text>
+                  <Text style={styles.metricLabel}>Sharp sand</Text>
+                </View>
+                {estimate.gravelT > 0 && (
+                  <View style={styles.metric}>
+                    <Text style={styles.metricValue}>{estimate.gravelT.toFixed(1)} t</Text>
+                    <Text style={styles.metricLabel}>Granite (¾″)</Text>
+                  </View>
+                )}
               </View>
-              <Text style={styles.calcSub}>Estimate bags for floor plastering/screeding</Text>
-              
-              <View style={styles.calcInputRow}>
-                <View style={styles.calcInputGroup}>
-                  <Text style={styles.calcInputLabel}>Area (sqm)</Text>
-                  <TextInput
-                    style={styles.calcInput}
-                    placeholder="e.g. 50"
-                    keyboardType="numeric"
-                    value={area}
-                    onChangeText={setArea}
-                  />
-                </View>
-                <View style={styles.calcInputGroup}>
-                  <Text style={styles.calcInputLabel}>Thickness (in)</Text>
-                  <TextInput
-                    style={styles.calcInput}
-                    placeholder="4"
-                    keyboardType="numeric"
-                    value={thickness}
-                    onChangeText={setThickness}
-                  />
-                </View>
-              </View>
-
-              {bagsNeeded > 0 && (
-                <View style={styles.resultArea}>
-                  <Text style={styles.resultLabel}>Estimated Bags Needed:</Text>
-                  <Text style={styles.resultValue}>{bagsNeeded} Bags</Text>
-                  <Text style={styles.resultNote}>*Estimated based on standard mix ratio (1:4)</Text>
-                </View>
+              {product && (
+                <>
+                  <View style={styles.costRow}>
+                    <Text style={styles.costLabel}>{brandOf(product.name)} at {formatPrice(product.price)}/bag</Text>
+                    <Text style={styles.cost}>{formatPrice(product.price * estimate.bags)}</Text>
+                  </View>
+                  <TouchableOpacity style={[styles.cta, !product.inStock && styles.ctaOff]} onPress={addEstimate} disabled={!product.inStock} activeOpacity={0.8}>
+                    <MaterialIcons name="add-shopping-cart" size={20} color={Colors.onSecondary} />
+                    <Text style={styles.ctaText}>{product.inStock ? `Add ${estimate.bags} bags to cart` : 'Out of stock'}</Text>
+                  </TouchableOpacity>
+                </>
               )}
-            </LinearGradient>
-          </View>
+              <Text style={styles.footnote}>Standard dry-volume method, 50 kg bags. Sand and granite are bought separately — ask your vendor for tipper prices.</Text>
+            </View>
+          ) : (
+            <View style={styles.resultEmpty}>
+              <MaterialIcons name="straighten" size={22} color={Colors.outline} />
+              <Text style={styles.resultEmptyText}>Enter the size of the area to see how many bags you need.</Text>
+            </View>
+          )}
         </View>
 
-        {/* ─── Product List ─── */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Available Products</Text>
-          <View style={styles.productList}>
-            {cementProducts.map((p) => (
-              <ProductCard key={p.id} product={p} horizontal onPress={() => router.push(`/product/${p.id}`)} onAddToCart={() => addItem(p)} />
-            ))}
-          </View>
+        <Text style={[styles.sectionTitle, styles.sectionGap]}>Buying tips</Text>
+        <View style={[styles.card, styles.tips]}>
+          {TIPS.map((t, i) => {
+            const open = openTip === i;
+            return (
+              <TouchableOpacity key={t.title} style={[styles.tip, i > 0 && styles.tipDivider]} onPress={() => setOpenTip(open ? null : i)} activeOpacity={0.7}>
+                <View style={styles.tipHead}>
+                  <MaterialIcons name={t.icon as any} size={20} color={Colors.primary} />
+                  <Text style={styles.tipTitle}>{t.title}</Text>
+                  <MaterialIcons name={open ? 'expand-less' : 'expand-more'} size={22} color={Colors.outline} />
+                </View>
+                {open && <Text style={styles.tipText}>{t.text}</Text>}
+              </TouchableOpacity>
+            );
+          })}
         </View>
+
+        <Text style={[styles.sectionTitle, styles.sectionGap]}>All cement</Text>
+        {cementProducts.map((p) => (
+          <ProductCard
+            key={p.id}
+            product={p}
+            horizontal
+            onPress={() => router.push(`/product/${p.id}`)}
+            onAddToCart={() => addItem(p)}
+            onToggleSave={() => toggleSave(p)}
+            isSaved={isSaved(p.id)}
+          />
+        ))}
+
+        <TouchableOpacity style={styles.installer} onPress={() => router.push('/(tabs)/workers' as any)} activeOpacity={0.85}>
+          <View style={styles.installerIcon}>
+            <MaterialIcons name="engineering" size={26} color={Colors.onPrimary} />
+          </View>
+          <View style={styles.flex}>
+            <Text style={styles.installerTitle}>Need a mason?</Text>
+            <Text style={styles.installerSub}>Hire a vetted mason for casting, screeding or plastering</Text>
+          </View>
+          <MaterialIcons name="chevron-right" size={24} color={Colors.onPrimary} />
+        </TouchableOpacity>
       </KeyboardAwareWrapper>
     </View>
   );
 }
 
+const shadow = { shadowColor: '#1b1c1c', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 1 };
+
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: Colors.background,
-  },
-  header: {
-    height: 220,
-    padding: 24,
-    paddingTop: 40,
-    overflow: 'hidden',
-    justifyContent: 'center',
-  },
-  headerContent: {
-    zIndex: 2,
-  },
-  headerEmoji: {
-    fontSize: 48,
-    marginBottom: 8,
-  },
-  headerTitle: {
-    fontSize: 28,
-    fontWeight: '900',
-    color: '#fff',
-  },
-  headerSub: {
-    fontSize: 14,
-    color: 'rgba(255,255,255,0.85)',
-    marginTop: 4,
-  },
-  trustRow: {
-    flexDirection: 'row',
-    gap: 16,
-    marginTop: 16,
-  },
-  trustItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    backgroundColor: 'rgba(255,255,255,0.15)',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 99,
-  },
-  trustText: {
-    color: '#fff',
-    fontSize: 11,
-    fontWeight: '600',
-  },
-  shape: {
-    position: 'absolute',
-    borderRadius: 999,
-    backgroundColor: 'rgba(255,255,255,0.08)',
-  },
-  shape1: {
-    width: 200,
-    height: 200,
-    top: -50,
-    right: -50,
-  },
-  shape2: {
-    width: 150,
-    height: 150,
-    bottom: -30,
-    left: -20,
-  },
-  section: {
-    marginTop: 24,
-    paddingHorizontal: 20,
-  },
-  sectionHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  sectionTitle: {
-    fontSize: 17,
-    fontWeight: '800',
-    color: Colors.textDark,
-    marginBottom: 12,
-  },
-  saveTag: {
-    backgroundColor: Colors.secondary,
-    color: '#fff',
-    fontSize: 10,
-    fontWeight: '900',
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 4,
-  },
-  brandScroll: {
-    gap: 10,
-  },
-  brandCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    backgroundColor: Colors.card,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: Colors.outlineVariant,
-  },
-  brandCardActive: {
-    backgroundColor: Colors.primary,
-    borderColor: Colors.primary,
-  },
-  brandEmoji: { fontSize: 18 },
-  brandName: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: Colors.textMedium,
-  },
-  brandNameActive: {
-    color: '#fff',
-  },
-  bulkScroll: {
-    gap: 12,
-  },
-  bulkCard: {
-    width: 160,
-    backgroundColor: Colors.card,
-    borderRadius: 8,
-    padding: 16,
-    borderLeftWidth: 4,
-    borderLeftColor: Colors.secondary,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  bulkBadge: {
-    backgroundColor: Colors.secondaryContainer,
-    alignSelf: 'flex-start',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 4,
-    marginBottom: 8,
-  },
-  bulkBadgeText: {
-    fontSize: 10,
-    fontWeight: '800',
-    color: Colors.onSecondaryContainer,
-  },
-  bulkTitle: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: Colors.textDark,
-  },
-  bulkBags: {
-    fontSize: 12,
-    color: Colors.textMedium,
-    marginTop: 2,
-  },
-  bulkPrice: {
-    fontSize: 16,
-    fontWeight: '800',
-    color: Colors.primary,
-    marginTop: 8,
-  },
-  bulkAction: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    marginTop: 10,
-  },
-  bulkActionText: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: Colors.primary,
-  },
-  calcCard: {
-    borderRadius: 8,
-    overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: Colors.outlineVariant,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  calcInner: {
-    padding: 18,
-  },
-  calcHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    marginBottom: 4,
-  },
-  calcTitle: {
-    fontSize: 16,
-    fontWeight: '800',
-    color: Colors.textDark,
-  },
-  calcSub: {
-    fontSize: 12,
-    color: Colors.textMedium,
-    marginBottom: 16,
-  },
-  calcInputRow: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-  calcInputGroup: {
-    flex: 1,
-    gap: 6,
-  },
-  calcInputLabel: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: Colors.textLight,
-  },
-  calcInput: {
-    backgroundColor: Colors.card,
-    borderWidth: 1,
-    borderColor: Colors.outlineVariant,
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    fontSize: 14,
-    color: Colors.textDark,
-  },
-  resultArea: {
-    marginTop: 18,
-    paddingTop: 16,
-    borderTopWidth: 1,
-    borderTopColor: Colors.outlineVariant,
-    alignItems: 'center',
-  },
-  resultLabel: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: Colors.textMedium,
-  },
-  resultValue: {
-    fontSize: 24,
-    fontWeight: '900',
-    color: Colors.secondary,
-    marginTop: 4,
-  },
-  resultNote: {
-    fontSize: 10,
-    color: Colors.textMuted,
-    marginTop: 6,
-  },
-  productList: {
-    gap: 12,
-    marginTop: 8,
-  },
+  container: { flex: 1, backgroundColor: Colors.background },
+  content: { padding: 16 },
+  flex: { flex: 1 },
+  noMargin: { marginBottom: 0 },
+
+
+  sectionTitle: { fontSize: 20, fontWeight: '600', color: Colors.onSurface, marginBottom: 12 },
+  sectionGap: { marginTop: 12 },
+  card: { backgroundColor: Colors.card, borderRadius: 8, padding: 16, marginBottom: 12, ...shadow },
+  label: { fontSize: 14, fontWeight: '600', color: Colors.onSurface, marginBottom: 8 },
+  wrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 16 },
+  split: { flexDirection: 'row', gap: 12 },
+
+  brandCard: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 12, borderRadius: 8, backgroundColor: Colors.card, borderWidth: 1, borderColor: Colors.divider, marginBottom: 8, ...shadow },
+  brandCardActive: { borderColor: Colors.primary, borderWidth: 2, padding: 11 },
+  brandLogo: { width: 48, height: 48, borderRadius: 8, backgroundColor: Colors.primary, alignItems: 'center', justifyContent: 'center' },
+  brandInitial: { fontSize: 22, fontWeight: '700', color: Colors.onPrimary },
+  brandNameRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  brandName: { fontSize: 16, fontWeight: '600', color: Colors.onSurface },
+  cheapest: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 999, backgroundColor: Colors.orangeTint },
+  cheapestText: { fontSize: 11, fontWeight: '700', color: Colors.secondary },
+  brandSub: { fontSize: 13, color: Colors.onSurfaceVariant, marginTop: 1 },
+  brandMeta: { fontSize: 12, color: Colors.outline, marginTop: 2 },
+  brandRight: { alignItems: 'flex-end', gap: 2 },
+  brandPrice: { fontSize: 17, fontWeight: '700', color: Colors.onSurface },
+  brandUnit: { fontSize: 11, color: Colors.outline },
+
+  jobRow: { flexDirection: 'row', gap: 8 },
+  job: { flex: 1, alignItems: 'center', gap: 4, paddingVertical: 12, borderRadius: 8, borderWidth: 1, borderColor: Colors.outlineVariant },
+  jobActive: { borderColor: Colors.primary, borderWidth: 2, paddingVertical: 11, backgroundColor: Colors.greenTint + '4d' },
+  jobText: { fontSize: 13, fontWeight: '600', color: Colors.onSurfaceVariant },
+  jobTextActive: { color: Colors.primary },
+  jobHint: { fontSize: 13, color: Colors.outline, marginTop: 8, marginBottom: 16 },
+  mixNote: { fontSize: 12, color: Colors.outline, marginTop: -8, marginBottom: 16 },
+
+  result: { marginTop: 20, padding: 16, borderRadius: 8, backgroundColor: Colors.background, borderLeftWidth: 4, borderLeftColor: Colors.secondary },
+  resultLabel: { fontSize: 14, color: Colors.onSurfaceVariant },
+  resultBig: { fontSize: 36, fontWeight: '700', color: Colors.onSurface, marginTop: 2 },
+  resultUnit: { fontSize: 16, fontWeight: '600', color: Colors.onSurfaceVariant },
+  metrics: { flexDirection: 'row', marginTop: 12 },
+  metric: { flex: 1 },
+  metricValue: { fontSize: 16, fontWeight: '700', color: Colors.onSurface },
+  metricLabel: { fontSize: 12, color: Colors.outline, marginTop: 2 },
+  costRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 16, paddingTop: 12, borderTopWidth: 1, borderTopColor: Colors.divider },
+  costLabel: { fontSize: 14, color: Colors.onSurfaceVariant, flex: 1 },
+  cost: { fontSize: 20, fontWeight: '700', color: Colors.onSurface },
+  cta: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, height: 52, borderRadius: 999, backgroundColor: Colors.secondary, marginTop: 12 },
+  ctaOff: { backgroundColor: Colors.outlineVariant },
+  ctaText: { fontSize: 16, fontWeight: '600', color: Colors.onSecondary },
+  footnote: { fontSize: 12, color: Colors.outline, marginTop: 12, lineHeight: 16 },
+  resultEmpty: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 20, padding: 16, borderRadius: 8, backgroundColor: Colors.background },
+  resultEmptyText: { flex: 1, fontSize: 14, color: Colors.onSurfaceVariant },
+
+  tips: { paddingVertical: 4 },
+  tip: { paddingVertical: 12 },
+  tipDivider: { borderTopWidth: 1, borderTopColor: Colors.divider },
+  tipHead: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  tipTitle: { flex: 1, fontSize: 15, fontWeight: '600', color: Colors.onSurface },
+  tipText: { fontSize: 14, color: Colors.onSurfaceVariant, lineHeight: 20, marginTop: 8, marginLeft: 32 },
+
+  installer: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 16, borderRadius: 8, backgroundColor: Colors.primary, marginTop: 12 },
+  installerIcon: { width: 48, height: 48, borderRadius: 24, backgroundColor: 'rgba(255,255,255,0.18)', alignItems: 'center', justifyContent: 'center' },
+  installerTitle: { fontSize: 16, fontWeight: '600', color: Colors.onPrimary },
+  installerSub: { fontSize: 13, color: Colors.greenTint, marginTop: 2 },
 });

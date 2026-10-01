@@ -1,22 +1,12 @@
-import KeyboardAwareWrapper from '../components/KeyboardAwareWrapper';
-import { useState } from 'react';
-import {
-  View,
-  Text,
-  ScrollView,
-  StyleSheet,
-  TouchableOpacity,
-  TextInput,
-  StatusBar,
-  Alert,
-  Modal,
-  Animated,
-} from 'react-native';
+import { useRef, useState } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, TextInput, Alert, Switch } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
 import { MaterialIcons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import KeyboardAwareWrapper from '../components/KeyboardAwareWrapper';
 import { Colors } from '../constants/Colors';
+
+const MAX_DESC = 300;
 
 const TRADES = ['Mason', 'Electrician', 'Plumber', 'Carpenter', 'Painter', 'Welder', 'Tiler', 'Designer', 'Steel Fabricator', 'Interior Designer'];
 
@@ -33,684 +23,265 @@ const SKILLS_LIST: Record<string, string[]> = {
   'Interior Designer': ['Space Planning', 'Decor', 'Furniture Selection', 'Lighting Design', 'Color Scheme'],
 };
 
-function SkillChip({ label, selected, onToggle }: { label: string; selected: boolean; onToggle: () => void }) {
+function Chip({ label, active, onPress, check }: { label: string; active: boolean; onPress: () => void; check?: boolean }) {
   return (
-    <TouchableOpacity
-      style={[styles.skillChip, selected && styles.skillChipActive]}
-      onPress={onToggle}
-      activeOpacity={0.7}
-    >
-      <Text style={[styles.skillChipText, selected && styles.skillChipTextActive]}>{label}</Text>
-      {selected && <MaterialIcons name="check" size={14} color="#fff" />}
+    <TouchableOpacity style={[styles.chip, active && styles.chipActive]} onPress={onPress} activeOpacity={0.7}>
+      {check && active && <MaterialIcons name="check" size={16} color={Colors.onPrimary} />}
+      <Text style={[styles.chipText, active && styles.chipTextActive]}>{label}</Text>
     </TouchableOpacity>
+  );
+}
+
+function Section({ title, hint, children }: { title: string; hint?: string; children: React.ReactNode }) {
+  return (
+    <View style={styles.section}>
+      <Text style={styles.sectionTitle}>{title}</Text>
+      {hint && <Text style={styles.sectionHint}>{hint}</Text>}
+      <View style={styles.card}>{children}</View>
+    </View>
   );
 }
 
 export default function CreateWorkScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const [step, setStep] = useState(0);
   const [trade, setTrade] = useState('');
-  const [selectedSkills, setSelectedSkills] = useState<string[]>([]);
+  const [skills, setSkills] = useState<string[]>([]);
   const [dailyRate, setDailyRate] = useState('');
-  const [available, setAvailable] = useState(true);
   const [phone, setPhone] = useState('');
   const [location, setLocation] = useState('');
   const [description, setDescription] = useState('');
-  const [showTradePicker, setShowTradePicker] = useState(false);
+  const [available, setAvailable] = useState(true);
+  const [focused, setFocused] = useState<string | null>(null);
+  const [showErrors, setShowErrors] = useState(false);
+  const phoneRef = useRef<TextInput>(null);
+  const locationRef = useRef<TextInput>(null);
+  const descRef = useRef<TextInput>(null);
 
-  const toggleSkill = (skill: string) => {
-    setSelectedSkills((prev) =>
-      prev.includes(skill) ? prev.filter((s) => s !== skill) : [...prev, skill]
-    );
+  const rate = Number(dailyRate) || 0;
+  const errors: Record<string, string> = {};
+  if (!trade) errors.trade = 'Pick your trade';
+  if (!skills.length) errors.skills = 'Pick at least one skill';
+  if (!rate) errors.rate = 'Enter your daily rate';
+  if (phone.replace(/\D/g, '').length < 10) errors.phone = 'Enter a valid phone number';
+  if (!location.trim()) errors.location = 'Enter where you work';
+  const missing = Object.keys(errors).length;
+  const err = (k: string) => (showErrors ? errors[k] : undefined);
+
+  const pickTrade = (t: string) => {
+    if (t === trade) return;
+    setTrade(t);
+    setSkills([]);
   };
 
-  const canContinue = () => {
-    if (step === 0) return trade.length > 0 && selectedSkills.length > 0;
-    if (step === 1) return dailyRate.length > 0 && phone.length > 0 && location.length > 0;
-    return true;
-  };
+  const toggleSkill = (s: string) =>
+    setSkills((prev) => (prev.includes(s) ? prev.filter((x) => x !== s) : [...prev, s]));
 
-  const handleSubmit = () => {
-    Alert.alert('Work Created!', 'Your work listing has been submitted for review and will be visible to clients soon.', [
+  const handlePublish = () => {
+    if (missing) {
+      setShowErrors(true);
+      Alert.alert('Almost there', `Complete these first:\n• ${Object.values(errors).join('\n• ')}`);
+      return;
+    }
+    Alert.alert('Listing submitted', 'Your work listing is under review and will be visible to clients soon.', [
       { text: 'OK', onPress: () => router.back() },
     ]);
   };
 
+  const inputStyle = (k: string) => [styles.input, focused === k && styles.inputFocused, err(k) && styles.inputError];
+  const focusProps = (k: string) => ({ onFocus: () => setFocused(k), onBlur: () => setFocused(null) });
+
+  const footer = (
+    <View style={[styles.footer, { paddingBottom: focused ? 12 : Math.max(16, insets.bottom + 8) }]}>
+      <View style={styles.flex}>
+        <Text style={styles.footerCount}>{missing ? `${missing} left` : 'Ready'}</Text>
+        <Text style={styles.footerSub}>{missing ? 'to complete' : 'to publish'}</Text>
+      </View>
+      <TouchableOpacity style={[styles.publishBtn, !!missing && styles.publishIdle]} onPress={handlePublish} activeOpacity={0.8}>
+        <Text style={styles.publishText}>Publish</Text>
+        <MaterialIcons name="arrow-forward" size={18} color={Colors.onSecondary} />
+      </TouchableOpacity>
+    </View>
+  );
+
   return (
     <View style={styles.container}>
-      <Stack.Screen options={{ headerShown: false }} />
-      <StatusBar barStyle="light-content" />
+      <Stack.Screen options={{ headerShown: true, headerTitle: 'New Work Listing', headerShadowVisible: false, headerStyle: { backgroundColor: Colors.background }, headerTintColor: Colors.primary }} />
 
-      <LinearGradient
-        colors={[Colors.secondary, '#8a2e00', Colors.secondaryContainer]}
-        style={[styles.headerWrap, { paddingTop: insets.top }]}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-      >
-        <View style={styles.headerRow}>
-          <TouchableOpacity style={styles.backBtn} onPress={() => router.back()} activeOpacity={0.7}>
-            <MaterialIcons name="arrow-back" size={22} color="#fff" />
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>Create Work Listing</Text>
-          <Text style={styles.headerStep}>{step + 1}/3</Text>
-        </View>
-
-        <View style={styles.progressTrack}>
-          <View style={[styles.progressFill, { width: `${((step + 1) / 3) * 100}%` }]} />
-        </View>
-
-        <View style={styles.stepLabels}>
-          {['Skills', 'Details', 'Review'].map((s, i) => (
-            <Text key={s} style={[styles.stepLabel, i <= step && styles.stepLabelActive]}>{s}</Text>
-          ))}
-        </View>
-      </LinearGradient>
-
-      <KeyboardAwareWrapper
-        style={styles.scrollView}
-        contentContainerStyle={[styles.scrollContent, { paddingBottom: 32 + insets.bottom + 80 }]}
-        showsVerticalScrollIndicator={false}
-        keyboardShouldPersistTaps="handled"
-      >
-        {step === 0 && (
-          <>
-            <Text style={styles.sectionTitle}>What's your trade?</Text>
-            <TouchableOpacity style={styles.tradePicker} onPress={() => setShowTradePicker(true)} activeOpacity={0.7}>
-              <MaterialIcons name="work" size={20} color={trade ? Colors.secondary : Colors.textLight} />
-              <Text style={[styles.tradePickerText, !trade && styles.tradePickerPlaceholder]}>
-                {trade || 'Select your trade'}
-              </Text>
-              <MaterialIcons name="keyboard-arrow-down" size={20} color={Colors.textLight} />
-            </TouchableOpacity>
-
-            {trade.length > 0 && (
-              <>
-                <Text style={styles.sectionTitle}>Select your skills</Text>
-                <Text style={styles.sectionSubtitle}>Choose all that apply</Text>
-                <View style={styles.skillsGrid}>
-                  {(SKILLS_LIST[trade] || []).map((skill) => (
-                    <SkillChip key={skill} label={skill} selected={selectedSkills.includes(skill)} onToggle={() => toggleSkill(skill)} />
-                  ))}
-                </View>
-              </>
-            )}
-          </>
-        )}
-
-        {step === 1 && (
-          <>
-            <Text style={styles.sectionTitle}>Work details</Text>
-
-            <View style={styles.fieldGroup}>
-              <Text style={styles.fieldLabel}>Daily Rate (₦)</Text>
-              <TextInput
-                style={styles.fieldInput}
-                placeholder="e.g. 15000"
-                placeholderTextColor={Colors.textMuted}
-                keyboardType="number-pad"
-                value={dailyRate}
-                onChangeText={setDailyRate}
-              />
-            </View>
-
-            <View style={styles.fieldGroup}>
-              <Text style={styles.fieldLabel}>Phone Number</Text>
-              <TextInput
-                style={styles.fieldInput}
-                placeholder="e.g. +234 802 345 6789"
-                placeholderTextColor={Colors.textMuted}
-                keyboardType="phone-pad"
-                value={phone}
-                onChangeText={setPhone}
-              />
-            </View>
-
-            <View style={styles.fieldGroup}>
-              <Text style={styles.fieldLabel}>Location</Text>
-              <TextInput
-                style={styles.fieldInput}
-                placeholder="e.g. Ikeja, Lagos"
-                placeholderTextColor={Colors.textMuted}
-                value={location}
-                onChangeText={setLocation}
-              />
-            </View>
-
-            <View style={styles.fieldGroup}>
-              <Text style={styles.fieldLabel}>Description (optional)</Text>
-              <TextInput
-                style={[styles.fieldInput, styles.fieldTextarea]}
-                placeholder="Briefly describe your experience and services..."
-                placeholderTextColor={Colors.textMuted}
-                multiline
-                numberOfLines={4}
-                value={description}
-                onChangeText={setDescription}
-                textAlignVertical="top"
-              />
-            </View>
-
-            <View style={styles.availabilityRow}>
-              <View>
-                <Text style={styles.availabilityLabel}>Available for work</Text>
-                <Text style={styles.availabilityHint}>{available ? 'You will appear in search results' : 'Hidden from search'}</Text>
-              </View>
-              <TouchableOpacity
-                style={[styles.availToggle, available && styles.availToggleActive]}
-                onPress={() => setAvailable(!available)}
-              >
-                <View style={[styles.availKnob, available && styles.availKnobActive]} />
-              </TouchableOpacity>
-            </View>
-          </>
-        )}
-
-        {step === 2 && (
-          <>
-            <Text style={styles.sectionTitle}>Review your listing</Text>
-            <Text style={styles.sectionSubtitle}>Make sure everything looks correct</Text>
-
-            <View style={styles.reviewCard}>
-              <View style={styles.reviewRow}>
-                <Text style={styles.reviewLabel}>Trade</Text>
-                <Text style={styles.reviewValue}>{trade}</Text>
-              </View>
-              <View style={styles.reviewDivider} />
-              <View style={styles.reviewRow}>
-                <Text style={styles.reviewLabel}>Skills</Text>
-                <View style={styles.reviewSkills}>
-                  {selectedSkills.map((s) => (
-                    <View key={s} style={styles.reviewSkillChip}>
-                      <Text style={styles.reviewSkillChipText}>{s}</Text>
-                    </View>
-                  ))}
-                </View>
-              </View>
-              <View style={styles.reviewDivider} />
-              <View style={styles.reviewRow}>
-                <Text style={styles.reviewLabel}>Daily Rate</Text>
-                <Text style={styles.reviewValueBold}>₦{Number(dailyRate).toLocaleString('en-NG')}</Text>
-              </View>
-              <View style={styles.reviewDivider} />
-              <View style={styles.reviewRow}>
-                <Text style={styles.reviewLabel}>Phone</Text>
-                <Text style={styles.reviewValue}>{phone}</Text>
-              </View>
-              <View style={styles.reviewDivider} />
-              <View style={styles.reviewRow}>
-                <Text style={styles.reviewLabel}>Location</Text>
-                <Text style={styles.reviewValue}>{location}</Text>
-              </View>
-              <View style={styles.reviewDivider} />
-              <View style={styles.reviewRow}>
-                <Text style={styles.reviewLabel}>Availability</Text>
-                <View style={[styles.reviewStatus, { backgroundColor: available ? Colors.success + '15' : Colors.surfaceVariant }]}>
-                  <View style={[styles.reviewStatusDot, { backgroundColor: available ? Colors.success : Colors.textLight }]} />
-                  <Text style={[styles.reviewStatusText, { color: available ? Colors.success : Colors.textLight }]}>
-                    {available ? 'Available' : 'Not Available'}
-                  </Text>
-                </View>
-              </View>
-              {description.length > 0 && (
-                <>
-                  <View style={styles.reviewDivider} />
-                  <View style={styles.reviewRow}>
-                    <Text style={styles.reviewLabel}>Description</Text>
-                    <Text style={styles.reviewDesc}>{description}</Text>
-                  </View>
-                </>
-              )}
-            </View>
-          </>
-        )}
-      </KeyboardAwareWrapper>
-
-      <View style={[styles.bottomBar, { paddingBottom: Math.max(16, insets.bottom) }]}>
-        {step > 0 && (
-          <TouchableOpacity style={styles.backStepBtn} onPress={() => setStep(step - 1)}>
-            <Text style={styles.backStepText}>Back</Text>
-          </TouchableOpacity>
-        )}
-        <TouchableOpacity
-          style={[styles.nextBtn, !canContinue() && styles.nextBtnDisabled]}
-          disabled={!canContinue()}
-          onPress={() => {
-            if (step < 2) setStep(step + 1);
-            else handleSubmit();
-          }}
-        >
-          <Text style={[styles.nextBtnText, !canContinue() && styles.nextBtnTextDisabled]}>
-            {step === 2 ? 'Submit Listing' : 'Continue'}
-          </Text>
-          <MaterialIcons name="arrow-forward" size={18} color={canContinue() ? '#fff' : Colors.textMuted} />
-        </TouchableOpacity>
+      <View style={styles.progressTrack}>
+        <View style={[styles.progressFill, { width: `${((5 - missing) / 5) * 100}%` }]} />
       </View>
 
-      <Modal visible={showTradePicker} transparent animationType="fade" onRequestClose={() => setShowTradePicker(false)}>
-        <TouchableOpacity style={styles.modalBackdrop} activeOpacity={1} onPress={() => setShowTradePicker(false)}>
-          <View style={styles.modalSheet}>
-            <Text style={styles.modalTitle}>Select Trade</Text>
-            <ScrollView style={styles.modalList} showsVerticalScrollIndicator={false}>
-              {TRADES.map((t) => (
-                <TouchableOpacity
-                  key={t}
-                  style={[styles.modalOption, trade === t && styles.modalOptionActive]}
-                  onPress={() => { setTrade(t); setSelectedSkills([]); setShowTradePicker(false); }}
-                >
-                  <Text style={[styles.modalOptionText, trade === t && styles.modalOptionTextActive]}>{t}</Text>
-                  {trade === t && <MaterialIcons name="check" size={18} color={Colors.secondary} />}
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
+      <KeyboardAwareWrapper contentContainerStyle={styles.content} footer={footer}>
+        <Section title="Your trade" hint="Clients search by trade first">
+          <View style={styles.chipWrap}>
+            {TRADES.map((t) => <Chip key={t} label={t} active={trade === t} onPress={() => pickTrade(t)} />)}
           </View>
-        </TouchableOpacity>
-      </Modal>
+          {err('trade') && <Text style={styles.errorText}>{err('trade')}</Text>}
+        </Section>
+
+        {trade !== '' && (
+          <Section title="Skills" hint={skills.length ? `${skills.length} selected` : 'Choose all that apply'}>
+            <View style={styles.chipWrap}>
+              {SKILLS_LIST[trade].map((s) => <Chip key={s} label={s} active={skills.includes(s)} onPress={() => toggleSkill(s)} check />)}
+            </View>
+            {err('skills') && <Text style={styles.errorText}>{err('skills')}</Text>}
+          </Section>
+        )}
+
+        <Section title="Rate & contact">
+          <Text style={styles.label}>Daily rate</Text>
+          <View style={[styles.rateBox, focused === 'rate' && styles.inputFocused, err('rate') && styles.inputError]}>
+            <Text style={styles.rateSymbol}>₦</Text>
+            <TextInput
+              style={styles.rateInput}
+              placeholder="15,000"
+              placeholderTextColor={Colors.outline}
+              keyboardType="number-pad"
+              value={rate ? rate.toLocaleString('en-NG') : ''}
+              onChangeText={(t) => setDailyRate(t.replace(/\D/g, ''))}
+              returnKeyType="next"
+              onSubmitEditing={() => phoneRef.current?.focus()}
+              {...focusProps('rate')}
+            />
+            <Text style={styles.rateSuffix}>/ day</Text>
+          </View>
+          {err('rate') && <Text style={styles.errorText}>{err('rate')}</Text>}
+
+          <Text style={[styles.label, styles.labelGap]}>Phone number</Text>
+          <TextInput
+            ref={phoneRef}
+            style={inputStyle('phone')}
+            placeholder="+234 802 345 6789"
+            placeholderTextColor={Colors.outline}
+            keyboardType="phone-pad"
+            textContentType="telephoneNumber"
+            autoComplete="tel"
+            value={phone}
+            onChangeText={setPhone}
+            returnKeyType="next"
+            onSubmitEditing={() => locationRef.current?.focus()}
+            {...focusProps('phone')}
+          />
+          {err('phone') && <Text style={styles.errorText}>{err('phone')}</Text>}
+
+          <Text style={[styles.label, styles.labelGap]}>Where you work</Text>
+          <TextInput
+            ref={locationRef}
+            style={inputStyle('location')}
+            placeholder="e.g. Ikeja, Lagos"
+            placeholderTextColor={Colors.outline}
+            value={location}
+            onChangeText={setLocation}
+            returnKeyType="next"
+            onSubmitEditing={() => descRef.current?.focus()}
+            {...focusProps('location')}
+          />
+          {err('location') && <Text style={styles.errorText}>{err('location')}</Text>}
+        </Section>
+
+        <Section title="About your work" hint="Optional, but listings with a short intro get more calls">
+          <TextInput
+            ref={descRef}
+            style={[...inputStyle('desc'), styles.textArea]}
+            placeholder="Years of experience, past projects, tools you bring…"
+            placeholderTextColor={Colors.outline}
+            multiline
+            maxLength={MAX_DESC}
+            value={description}
+            onChangeText={setDescription}
+            {...focusProps('desc')}
+          />
+          <Text style={styles.counter}>{description.length}/{MAX_DESC}</Text>
+        </Section>
+
+        <View style={[styles.card, styles.availRow]}>
+          <View style={styles.flex}>
+            <Text style={styles.availTitle}>Available for work</Text>
+            <Text style={styles.availHint}>{available ? 'You appear in client searches' : 'Hidden from searches'}</Text>
+          </View>
+          <Switch
+            value={available}
+            onValueChange={setAvailable}
+            trackColor={{ false: Colors.outlineVariant, true: Colors.primary }}
+            thumbColor="#fff"
+            ios_backgroundColor={Colors.outlineVariant}
+          />
+        </View>
+      </KeyboardAwareWrapper>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: Colors.background,
-  },
-  scrollView: {
-    flex: 1,
-  },
-  scrollContent: {
-    padding: 16,
-    gap: 16,
-    paddingTop: 12,
-  },
+  container: { flex: 1, backgroundColor: Colors.background },
+  content: { padding: 16, paddingBottom: 24 },
+  flex: { flex: 1 },
 
-  /* ─── Header ─── */
-  headerWrap: {
-    paddingBottom: 12,
-    borderBottomLeftRadius: 24,
-    borderBottomRightRadius: 24,
-  },
-  headerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-  },
-  backBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  headerTitle: {
-    flex: 1,
-    fontSize: 17,
-    fontWeight: '800',
-    color: '#fff',
-    marginLeft: 12,
-  },
-  headerStep: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: 'rgba(255,255,255,0.7)',
-  },
-  progressTrack: {
-    height: 4,
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    borderRadius: 2,
-    marginHorizontal: 16,
-    marginTop: 4,
-    overflow: 'hidden',
-  },
-  progressFill: {
-    height: '100%',
-    backgroundColor: '#fff',
-    borderRadius: 2,
-  },
-  stepLabels: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingTop: 8,
-  },
-  stepLabel: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: 'rgba(255,255,255,0.5)',
-  },
-  stepLabelActive: {
-    color: '#fff',
-  },
+  progressTrack: { height: 4, backgroundColor: Colors.surfaceVariant },
+  progressFill: { height: 4, backgroundColor: Colors.primary },
 
-  /* ─── Section ─── */
-  sectionTitle: {
-    fontSize: 17,
-    fontWeight: '800',
-    color: Colors.textDark,
-  },
-  sectionSubtitle: {
-    fontSize: 13,
-    color: Colors.textMedium,
-    marginTop: -12,
-  },
-
-  /* ─── Trade Picker ─── */
-  tradePicker: {
-    flexDirection: 'row',
-    alignItems: 'center',
+  section: { marginBottom: 24 },
+  sectionTitle: { fontSize: 20, fontWeight: '600', color: Colors.onSurface, lineHeight: 28 },
+  sectionHint: { fontSize: 14, color: Colors.outline, lineHeight: 20, marginTop: 2 },
+  card: {
     backgroundColor: Colors.card,
-    borderRadius: 14,
+    borderRadius: 8,
     padding: 16,
-    gap: 12,
-    borderWidth: 1,
-    borderColor: Colors.outlineVariant,
-    shadowColor: '#000',
+    marginTop: 12,
+    shadowColor: '#1b1c1c',
     shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.03,
-    shadowRadius: 2,
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
     elevation: 1,
   },
-  tradePickerText: {
-    flex: 1,
-    fontSize: 15,
-    fontWeight: '600',
-    color: Colors.textDark,
-  },
-  tradePickerPlaceholder: {
-    color: Colors.textMuted,
-    fontWeight: '400',
-  },
 
-  /* ─── Skills ─── */
-  skillsGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  skillChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    backgroundColor: Colors.card,
-    borderRadius: 99,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
+  chipWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  chip: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 16, height: 40, borderRadius: 999, backgroundColor: Colors.surfaceVariant + '99' },
+  chipActive: { backgroundColor: Colors.primary },
+  chipText: { fontSize: 14, fontWeight: '500', color: Colors.onSurfaceVariant },
+  chipTextActive: { color: Colors.onPrimary, fontWeight: '600' },
+
+  label: { fontSize: 14, fontWeight: '600', color: Colors.onSurface, marginBottom: 8 },
+  labelGap: { marginTop: 16 },
+  input: {
+    height: 48,
+    paddingHorizontal: 12,
+    borderRadius: 8,
     borderWidth: 1,
     borderColor: Colors.outlineVariant,
-  },
-  skillChipActive: {
-    backgroundColor: Colors.secondary,
-    borderColor: Colors.secondary,
-  },
-  skillChipText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: Colors.textDark,
-  },
-  skillChipTextActive: {
-    color: '#fff',
-  },
-
-  /* ─── Fields ─── */
-  fieldGroup: {
-    gap: 6,
-  },
-  fieldLabel: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: Colors.textMedium,
-  },
-  fieldInput: {
     backgroundColor: Colors.card,
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    fontSize: 15,
-    color: Colors.textDark,
-    borderWidth: 1,
-    borderColor: Colors.outlineVariant,
+    fontSize: 16,
+    color: Colors.onSurface,
   },
-  fieldTextarea: {
-    minHeight: 100,
-    paddingTop: 14,
-  },
+  inputFocused: { borderColor: Colors.primary, borderWidth: 2 },
+  inputError: { borderColor: Colors.error },
+  textArea: { height: 112, paddingTop: 12, textAlignVertical: 'top' },
+  counter: { fontSize: 12, color: Colors.outline, textAlign: 'right', marginTop: 4 },
+  errorText: { fontSize: 12, fontWeight: '500', color: Colors.error, marginTop: 6 },
 
-  /* ─── Availability ─── */
-  availabilityRow: {
+  rateBox: { flexDirection: 'row', alignItems: 'center', height: 56, paddingHorizontal: 12, borderRadius: 8, borderWidth: 1, borderColor: Colors.outlineVariant },
+  rateSymbol: { fontSize: 22, fontWeight: '700', color: Colors.onSurface, marginRight: 4 },
+  rateInput: { flex: 1, fontSize: 22, fontWeight: '700', color: Colors.onSurface, paddingVertical: 0 },
+  rateSuffix: { fontSize: 14, color: Colors.outline },
+
+  availRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 0 },
+  availTitle: { fontSize: 16, fontWeight: '600', color: Colors.onSurface },
+  availHint: { fontSize: 13, color: Colors.outline, marginTop: 2 },
+
+  footer: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: Colors.card,
-    borderRadius: 14,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: Colors.outlineVariant,
-  },
-  availabilityLabel: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: Colors.textDark,
-  },
-  availabilityHint: {
-    fontSize: 11,
-    color: Colors.textLight,
-    marginTop: 2,
-  },
-  availToggle: {
-    width: 48,
-    height: 26,
-    borderRadius: 13,
-    backgroundColor: Colors.surfaceVariant,
-    justifyContent: 'center',
-    paddingHorizontal: 3,
-  },
-  availToggleActive: {
-    backgroundColor: Colors.success,
-  },
-  availKnob: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    backgroundColor: Colors.card,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.2,
-    shadowRadius: 2,
-    elevation: 2,
-  },
-  availKnobActive: {
-    alignSelf: 'flex-end',
-  },
-
-  /* ─── Review ─── */
-  reviewCard: {
-    backgroundColor: Colors.card,
-    borderRadius: 14,
-    padding: 16,
-    gap: 0,
-    borderLeftWidth: 3,
-    borderLeftColor: Colors.secondary,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.04,
-    shadowRadius: 3,
-    elevation: 2,
-  },
-  reviewRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    paddingVertical: 12,
-    gap: 12,
-  },
-  reviewLabel: {
-    fontSize: 13,
-    color: Colors.textLight,
-    fontWeight: '500',
-    minWidth: 80,
-  },
-  reviewValue: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: Colors.textDark,
-    flex: 1,
-    textAlign: 'right',
-  },
-  reviewValueBold: {
-    fontSize: 15,
-    fontWeight: '800',
-    color: Colors.secondary,
-  },
-  reviewDivider: {
-    height: 1,
-    backgroundColor: Colors.divider,
-  },
-  reviewSkills: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 6,
-    flex: 1,
-    justifyContent: 'flex-end',
-  },
-  reviewSkillChip: {
-    backgroundColor: Colors.secondary + '12',
-    borderRadius: 99,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-  },
-  reviewSkillChipText: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: Colors.secondary,
-  },
-  reviewStatus: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-    borderRadius: 99,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-  },
-  reviewStatusDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-  },
-  reviewStatusText: {
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  reviewDesc: {
-    fontSize: 13,
-    color: Colors.textDark,
-    fontWeight: '500',
-    flex: 1,
-    textAlign: 'right',
-    lineHeight: 18,
-  },
-
-  /* ─── Bottom Bar ─── */
-  bottomBar: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    flexDirection: 'row',
-    gap: 10,
+    gap: 16,
     paddingHorizontal: 16,
     paddingTop: 12,
-    backgroundColor: Colors.background,
+    backgroundColor: Colors.card,
     borderTopWidth: 1,
     borderTopColor: Colors.divider,
   },
-  backStepBtn: {
-    paddingHorizontal: 20,
-    paddingVertical: 14,
-    borderRadius: 99,
-    borderWidth: 1,
-    borderColor: Colors.outlineVariant,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  backStepText: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: Colors.textMedium,
-  },
-  nextBtn: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    backgroundColor: Colors.secondary,
-    borderRadius: 99,
-    paddingVertical: 14,
-    shadowColor: Colors.secondary,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 6,
-  },
-  nextBtnDisabled: {
-    backgroundColor: Colors.surfaceVariant,
-    shadowOpacity: 0,
-    elevation: 0,
-  },
-  nextBtnText: {
-    fontSize: 15,
-    fontWeight: '800',
-    color: '#fff',
-  },
-  nextBtnTextDisabled: {
-    color: Colors.textMuted,
-  },
-
-  /* ─── Modal ─── */
-  modalBackdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.4)',
-    justifyContent: 'center',
-    padding: 32,
-  },
-  modalSheet: {
-    backgroundColor: Colors.card,
-    borderRadius: 20,
-    padding: 20,
-    maxHeight: 400,
-  },
-  modalTitle: {
-    fontSize: 17,
-    fontWeight: '800',
-    color: Colors.textDark,
-    marginBottom: 14,
-  },
-  modalList: {
-    gap: 0,
-  },
-  modalOption: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 14,
-    paddingHorizontal: 4,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.divider,
-  },
-  modalOptionActive: {
-    backgroundColor: Colors.secondary + '08',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    marginHorizontal: -8,
-  },
-  modalOptionText: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: Colors.textDark,
-  },
-  modalOptionTextActive: {
-    color: Colors.secondary,
-  },
+  footerCount: { fontSize: 16, fontWeight: '700', color: Colors.onSurface },
+  footerSub: { fontSize: 12, color: Colors.outline },
+  publishBtn: { flexDirection: 'row', alignItems: 'center', gap: 8, height: 52, paddingHorizontal: 28, borderRadius: 999, backgroundColor: Colors.secondary },
+  publishIdle: { opacity: 0.6 },
+  publishText: { fontSize: 16, fontWeight: '600', color: Colors.onSecondary },
 });

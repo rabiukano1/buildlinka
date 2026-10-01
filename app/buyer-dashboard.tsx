@@ -16,6 +16,10 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors } from '../constants/Colors';
 import { useNotifications } from '../contexts/NotificationContext';
 import { PRODUCTS, CATEGORIES } from '../constants/MockData';
+import Dropdown from '../components/Dropdown';
+
+// "Steel & Iron" -> "steel-iron", matching the files in app/category/.
+const categorySlug = (name: string) => name.toLowerCase().replace(/&/g, '').trim().replace(/\s+/g, '-');
 
 const formatPrice = (price: number) => '₦' + price.toLocaleString('en-NG');
 
@@ -130,18 +134,15 @@ export default function BuyerDashboardScreen() {
               <Text style={styles.viewAll}>View All</Text>
             </TouchableOpacity>
           </View>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.categoryRow}>
-            {CATEGORIES.slice(0, 8).map((cat) => (
-              <TouchableOpacity
-                key={cat.id}
-                style={styles.categoryChip}
-                onPress={() => router.push(`/category/${cat.name.toLowerCase().replace(/\s+/g, '-')}` as any)}
-              >
-                <MaterialIcons name={cat.icon as any} size={20} color={cat.color} />
-                <Text style={[styles.categoryChipText, { color: cat.color }]}>{cat.name}</Text>
-              </TouchableOpacity>
-            ))}
-          </ScrollView>
+          <View style={styles.categoryRow}>
+            <Dropdown
+              title="Categories"
+              value=""
+              placeholder={{ label: 'Choose a category', icon: 'category' }}
+              options={CATEGORIES.filter((c) => c.name !== 'More').map((c) => ({ value: categorySlug(c.name), label: c.name, icon: c.icon, count: c.count }))}
+              onChange={(slug) => router.push(`/category/${slug}` as any)}
+            />
+          </View>
         </View>
 
         {/* ─── Recommended Products ─── */}
@@ -407,28 +408,7 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   categoryRow: {
-    gap: 10,
-    paddingRight: 16,
-  },
-  categoryChip: {
     flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    backgroundColor: Colors.card,
-    borderRadius: 99,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderWidth: 1,
-    borderColor: Colors.outlineVariant,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.03,
-    shadowRadius: 2,
-    elevation: 1,
-  },
-  categoryChipText: {
-    fontSize: 13,
-    fontWeight: '600',
   },
 
   /* ─── Products ─── */

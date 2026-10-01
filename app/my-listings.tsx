@@ -59,211 +59,276 @@ const INITIAL_INVENTORY: InventoryItem[] = [
   { id: 'inv-8', title: 'Emulsion Paint 20L (White)', emoji: '🎨', category: 'Paint', inStock: 14, minStock: 10, unit: 'bucket', costPrice: 9000, sellingPrice: 12500, lastRestocked: '20 Apr 2026' },
 ];
 
-const FILTERS = [
-  { key: 'all', label: 'All', icon: 'list' },
-  { key: 'active', label: 'Active', icon: 'check-circle' },
-  { key: 'draft', label: 'Drafts', icon: 'edit-note' },
-  { key: 'sold', label: 'Sold', icon: 'sell' },
-] as const;
-
-const STATUS_META: Record<string, { label: string; color: string; bg: string }> = {
-  active: { label: 'Active', color: Colors.primary, bg: Colors.primary + '18' },
-  draft: { label: 'Draft', color: Colors.amber, bg: Colors.amber + '18' },
-  sold: { label: 'Sold', color: Colors.secondary, bg: Colors.secondary + '18' },
-};
-
 const TABS = [
   { key: 'listings', icon: 'storefront', label: 'Listings' },
   { key: 'inventory', icon: 'inventory-2', label: 'Inventory' },
 ] as const;
 
+const STATUS_META: Record<ListingStatus, { label: string; color: string; bg: string }> = {
+  active: { label: 'Active', color: Colors.primary, bg: Colors.greenTint },
+  draft: { label: 'Draft', color: Colors.amber, bg: Colors.amberLight },
+  sold: { label: 'Sold', color: Colors.secondary, bg: Colors.orangeTint },
+};
+
+const CATEGORIES = Array.from(new Set(PRODUCTS.map((p) => p.category)));
+const QUICK_RESTOCK = [10, 25, 50, 100];
+
+const stockStatus = (i: InventoryItem) =>
+  i.inStock === 0
+    ? { key: 'out', label: 'Out of stock', color: Colors.outline, bg: Colors.surfaceVariant }
+    : i.inStock <= i.minStock
+      ? { key: 'low', label: 'Low stock', color: Colors.error, bg: '#ffdad6' }
+      : { key: 'ok', label: 'In stock', color: Colors.primary, bg: Colors.greenTint };
+
 const todaysDate = () =>
   new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }).replace(/,/g, '');
 
 const formatPrice = (price: number) => '₦' + price.toLocaleString('en-NG');
+const compact = (n: number) => (n >= 1e6 ? `₦${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `₦${Math.round(n / 1e3)}K` : formatPrice(n));
 
-type DropdownOption = { label: string; value: string };
+function FadeIn({ index, children }: { index: number; children: React.ReactNode }) {
+  const anim = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    Animated.timing(anim, { toValue: 1, duration: 200, delay: Math.min(index, 8) * 50, useNativeDriver: true }).start();
+  }, []);
+  const translateY = anim.interpolate({ inputRange: [0, 1], outputRange: [12, 0] });
+  return <Animated.View style={{ opacity: anim, transform: [{ translateY }] }}>{children}</Animated.View>;
+}
 
-function InventoryCard({
-  item, index, onUpdateStock, onRemove, onRestock,
-}: {
+function StatCard({ label, value, accent, sub }: { label: string; value: string; accent: string; sub?: string }) {
+  return (
+    <View style={[styles.statCard, { borderLeftColor: accent }]}>
+      <Text style={styles.statLabel}>{label}</Text>
+      <Text style={[styles.statValue, { color: accent === Colors.error ? Colors.error : Colors.onSurface }]} numberOfLines={1}>{value}</Text>
+      {sub && <Text style={styles.statSub}>{sub}</Text>}
+    </View>
+  );
+}
+
+function Chips({ options, value, onSelect }: { options: { key: string; label: string; count?: number }[]; value: string; onSelect: (k: string) => void }) {
+  return (
+    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
+      {options.map((o) => {
+        const active = value === o.key;
+        return (
+          <TouchableOpacity key={o.key} style={[styles.chip, active && styles.chipActive]} onPress={() => onSelect(o.key)} activeOpacity={0.7}>
+            <Text style={[styles.chipText, active && styles.chipTextActive]}>{o.label}</Text>
+            {o.count !== undefined && <Text style={[styles.chipCount, active && styles.chipTextActive]}>{o.count}</Text>}
+          </TouchableOpacity>
+        );
+      })}
+    </ScrollView>
+  );
+}
+
+function Pill({ label, color, bg }: { label: string; color: string; bg: string }) {
+  return (
+    <View style={[styles.pill, { backgroundColor: bg }]}>
+      <View style={[styles.pillDot, { backgroundColor: color }]} />
+      <Text style={[styles.pillText, { color }]}>{label}</Text>
+    </View>
+  );
+}
+
+function Sheet({ visible, title, onClose, children }: { visible: boolean; title: string; onClose: () => void; children: React.ReactNode }) {
+  const insets = useSafeAreaInsets();
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.sheetOverlay}>
+        <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={onClose} />
+        <View style={[styles.sheet, { paddingBottom: 24 + insets.bottom }]}>
+          <View style={styles.sheetHandle} />
+          <View style={styles.sheetHeader}>
+            <Text style={styles.sheetTitle}>{title}</Text>
+            <TouchableOpacity style={styles.iconBtn} onPress={onClose} hitSlop={8}>
+              <MaterialIcons name="close" size={20} color={Colors.onSurfaceVariant} />
+            </TouchableOpacity>
+          </View>
+          {children}
+        </View>
+      </KeyboardAvoidingView>
+    </Modal>
+  );
+}
+
+function ListingCard({ item, onAdvance, onDelete }: { item: Listing; onAdvance: (l: Listing) => void; onDelete: (l: Listing) => void }) {
+  const meta = STATUS_META[item.status];
+  const nextAction = item.status === 'draft' ? { icon: 'publish', label: 'Publish' } : item.status === 'active' ? { icon: 'sell', label: 'Mark sold' } : null;
+  return (
+    <View style={[styles.card, { borderLeftColor: meta.color }]}>
+      <View style={styles.cardRow}>
+        <View style={styles.emojiTile}>
+          <Text style={styles.emoji}>{item.emoji}</Text>
+        </View>
+        <View style={styles.cardBody}>
+          <View style={styles.cardTopRow}>
+            <Text style={styles.cardTitle} numberOfLines={2}>{item.title}</Text>
+            <Pill {...meta} />
+          </View>
+          <Text style={styles.cardPrice}>
+            {formatPrice(item.price)} <Text style={styles.cardPerUnit}>/ {item.unit}</Text>
+          </Text>
+        </View>
+      </View>
+
+      <View style={styles.metaRow}>
+        <View style={styles.metaItem}>
+          <MaterialIcons name="inventory-2" size={14} color={Colors.outline} />
+          <Text style={styles.metaText}>{item.quantity} in stock</Text>
+        </View>
+        <View style={styles.metaItem}>
+          <MaterialIcons name="visibility" size={14} color={Colors.outline} />
+          <Text style={styles.metaText}>{item.views}</Text>
+        </View>
+        <View style={styles.metaItem}>
+          <MaterialIcons name="forum" size={14} color={Colors.outline} />
+          <Text style={styles.metaText}>{item.inquiries}</Text>
+        </View>
+      </View>
+
+      <View style={styles.cardFooter}>
+        <Text style={styles.cardDate}>Listed {item.date}</Text>
+        <View style={styles.footerActions}>
+          {nextAction && (
+            <TouchableOpacity style={styles.textBtn} onPress={() => onAdvance(item)} activeOpacity={0.7}>
+              <MaterialIcons name={nextAction.icon as any} size={16} color={Colors.primary} />
+              <Text style={styles.textBtnLabel}>{nextAction.label}</Text>
+            </TouchableOpacity>
+          )}
+          <TouchableOpacity style={styles.iconBtn} onPress={() => onDelete(item)} hitSlop={6} activeOpacity={0.6}>
+            <MaterialIcons name="delete-outline" size={18} color={Colors.error} />
+          </TouchableOpacity>
+        </View>
+      </View>
+    </View>
+  );
+}
+
+function InventoryCard({ item, onUpdateStock, onRemove, onRestock }: {
   item: InventoryItem;
-  index: number;
   onUpdateStock: (item: InventoryItem, delta: number) => void;
   onRemove: (item: InventoryItem) => void;
   onRestock: (item: InventoryItem) => void;
 }) {
-  const isLow = item.inStock <= item.minStock;
-  const margin = item.costPrice > 0 ? ((item.sellingPrice - item.costPrice) / item.costPrice * 100).toFixed(0) : '0';
-  const stockRatio = Math.min(item.inStock / item.minStock, 2);
-  const barColor = isLow ? Colors.error : stockRatio >= 1.5 ? Colors.primaryGreen : Colors.amber;
-  const fadeAnim = useRef(new Animated.Value(0)).current;
-  const slideAnim = useRef(new Animated.Value(20)).current;
-  useEffect(() => {
-    Animated.parallel([
-      Animated.timing(fadeAnim, { toValue: 1, duration: 300, delay: index * 60, useNativeDriver: true }),
-      Animated.timing(slideAnim, { toValue: 0, duration: 300, delay: index * 60, useNativeDriver: true }),
-    ]).start();
-  }, []);
+  const status = stockStatus(item);
+  const margin = item.costPrice > 0 ? Math.round(((item.sellingPrice - item.costPrice) / item.costPrice) * 100) : 0;
+  const fill = Math.min(item.inStock / (item.minStock * 2), 1);
   return (
-    <Animated.View style={{ opacity: fadeAnim, transform: [{ translateY: slideAnim }] }}>
-      <View style={styles.invCard}>
-        <View style={styles.invCardLeft}>
-          <View style={[styles.invEmojiBadge, isLow && { backgroundColor: Colors.error + '15' }]}>
-            <Text style={styles.invEmoji}>{item.emoji}</Text>
-          </View>
-          <View style={[styles.stockDot, { backgroundColor: barColor }]} />
+    <View style={[styles.card, { borderLeftColor: status.color }, status.key === 'out' && styles.cardMuted]}>
+      <View style={styles.cardRow}>
+        <View style={styles.emojiTile}>
+          <Text style={styles.emoji}>{item.emoji}</Text>
         </View>
-        <View style={styles.invCardBody}>
-          <View style={styles.invCardTop}>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.invTitle} numberOfLines={1}>{item.title}</Text>
-              <Text style={styles.invCategory}>{item.category}</Text>
-            </View>
-            <TouchableOpacity style={styles.invDeleteBtn} activeOpacity={0.6} onPress={() => onRemove(item)}>
-              <MaterialIcons name="delete-outline" size={16} color={Colors.textMuted} />
+        <View style={styles.cardBody}>
+          <View style={styles.cardTopRow}>
+            <Text style={styles.cardTitle} numberOfLines={2}>{item.title}</Text>
+            <TouchableOpacity style={styles.iconBtn} onPress={() => onRemove(item)} hitSlop={6} activeOpacity={0.6}>
+              <MaterialIcons name="delete-outline" size={18} color={Colors.outline} />
             </TouchableOpacity>
           </View>
-
-          <View style={styles.stockBarTrack}>
-            <View style={[styles.stockBarFill, { width: `${Math.min(stockRatio * 50, 100)}%`, backgroundColor: barColor }]} />
+          <View style={styles.subRow}>
+            <Pill {...status} />
+            <Text style={styles.subText}>{item.category}</Text>
           </View>
-
-          <View style={styles.invMetrics}>
-            <View style={styles.invMetric}>
-              <Text style={styles.invMetricLabel}>In Stock</Text>
-              <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 3 }}>
-                <Text style={[styles.invMetricValue, isLow && { color: Colors.error }]}>{item.inStock}</Text>
-                <Text style={styles.invMetricUnit}>/ {item.minStock}</Text>
-              </View>
-            </View>
-            <View style={styles.invMetric}>
-              <Text style={styles.invMetricLabel}>Price</Text>
-              <Text style={styles.invMetricValue}>{formatPrice(item.sellingPrice)}</Text>
-            </View>
-            <View style={styles.invMetric}>
-              <Text style={styles.invMetricLabel}>Margin</Text>
-              <Text style={[styles.invMetricValue, { color: Colors.primaryGreen }]}>{margin}%</Text>
-            </View>
-          </View>
-
-          <View style={styles.invActions}>
-            <View style={styles.qtyControls}>
-              <TouchableOpacity style={styles.qtyBtn} onPress={() => onUpdateStock(item, -1)} activeOpacity={0.6}>
-                <MaterialIcons name="remove" size={13} color={Colors.textMedium} />
-              </TouchableOpacity>
-              <Text style={styles.qtyValue}>{item.inStock}</Text>
-              <TouchableOpacity style={styles.qtyBtn} onPress={() => onUpdateStock(item, 1)} activeOpacity={0.6}>
-                <MaterialIcons name="add" size={13} color={Colors.textMedium} />
-              </TouchableOpacity>
-            </View>
-            <TouchableOpacity
-              style={styles.restockBtn}
-              onPress={() => onRestock(item)}
-              activeOpacity={0.7}
-            >
-              <MaterialIcons name="restart-alt" size={13} color={Colors.primary} />
-              <Text style={styles.restockBtnLabel}>Restock</Text>
-            </TouchableOpacity>
-          </View>
-
-          <Text style={styles.invDate}>Last restocked: {item.lastRestocked}</Text>
         </View>
       </View>
-    </Animated.View>
+
+      <View style={styles.metrics}>
+        <View style={styles.metric}>
+          <Text style={styles.metricLabel}>Available</Text>
+          <Text style={[styles.metricValue, { color: status.key === 'ok' ? Colors.onSurface : status.color }]}>
+            {item.inStock} <Text style={styles.metricUnit}>{item.unit}</Text>
+          </Text>
+        </View>
+        <View style={styles.metric}>
+          <Text style={styles.metricLabel}>Price</Text>
+          <Text style={styles.metricValue}>{formatPrice(item.sellingPrice)}</Text>
+        </View>
+        <View style={styles.metric}>
+          <Text style={styles.metricLabel}>Margin</Text>
+          <Text style={[styles.metricValue, { color: Colors.primary }]}>{margin}%</Text>
+        </View>
+      </View>
+
+      <View style={styles.barTrack}>
+        <View style={[styles.barFill, { width: `${fill * 100}%`, backgroundColor: status.color }]} />
+      </View>
+      <Text style={styles.barCaption}>Min. level {item.minStock} · restocked {item.lastRestocked}</Text>
+
+      <View style={styles.invActions}>
+        <View style={styles.stepper}>
+          <TouchableOpacity style={styles.stepBtn} onPress={() => onUpdateStock(item, -1)} disabled={item.inStock === 0} activeOpacity={0.6}>
+            <MaterialIcons name="remove" size={18} color={item.inStock === 0 ? Colors.outlineVariant : Colors.primary} />
+          </TouchableOpacity>
+          <Text style={styles.stepValue}>{item.inStock}</Text>
+          <TouchableOpacity style={styles.stepBtn} onPress={() => onUpdateStock(item, 1)} activeOpacity={0.6}>
+            <MaterialIcons name="add" size={18} color={Colors.primary} />
+          </TouchableOpacity>
+        </View>
+        <TouchableOpacity style={styles.restockBtn} onPress={() => onRestock(item)} activeOpacity={0.7}>
+          <MaterialIcons name="add-box" size={16} color={Colors.onPrimary} />
+          <Text style={styles.restockText}>Restock</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
   );
 }
 
 export default function MyListingsScreen() {
   const router = useRouter();
-  const [activeFilter, setActiveFilter] = useState<string>('all');
-  const [activeTab, setActiveTab] = useState<'listings' | 'inventory'>('listings');
-  const [inventory, setInventory] = useState<InventoryItem[]>(INITIAL_INVENTORY);
-  const [showAddModal, setShowAddModal] = useState(false);
   const insets = useSafeAreaInsets();
-  const [searchQuery, setSearchQuery] = useState('');
-  const [refreshing, setRefreshing] = useState(false);
-  const [showRestockModal, setShowRestockModal] = useState(false);
-  const [restockTarget, setRestockTarget] = useState<InventoryItem | null>(null);
-  const [restockQty, setRestockQty] = useState('');
+  const [activeTab, setActiveTab] = useState<'listings' | 'inventory'>('listings');
+  const [query, setQuery] = useState('');
+  const [listings, setListings] = useState<Listing[]>(MY_LISTINGS);
+  const [listingFilter, setListingFilter] = useState('all');
+  const [inventory, setInventory] = useState<InventoryItem[]>(INITIAL_INVENTORY);
+  const [stockFilter, setStockFilter] = useState('all');
 
-  const [catDropdownOpen, setCatDropdownOpen] = useState(false);
-  const [prodDropdownOpen, setProdDropdownOpen] = useState(false);
+  const [showAddSheet, setShowAddSheet] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState('');
   const [selectedProductId, setSelectedProductId] = useState('');
   const [addQty, setAddQty] = useState('');
   const [addCostPrice, setAddCostPrice] = useState('');
   const [addMinStock, setAddMinStock] = useState('');
 
-  const catBtnRef = useRef<View>(null!) as React.RefObject<View>;
-  const prodBtnRef = useRef<View>(null!) as React.RefObject<View>;
-  const [dropdownPos, setDropdownPos] = useState({ top: 0, left: 0, width: 0 });
+  const [restockTarget, setRestockTarget] = useState<InventoryItem | null>(null);
+  const [restockQty, setRestockQty] = useState('');
 
-  const catSlideAnim = useRef(new Animated.Value(0)).current;
-  const prodSlideAnim = useRef(new Animated.Value(0)).current;
+  const q = query.trim().toLowerCase();
 
-  const filtered = useMemo(() => {
-    if (activeFilter === 'all') return MY_LISTINGS;
-    return MY_LISTINGS.filter((l) => l.status === activeFilter);
-  }, [activeFilter]);
+  const filteredListings = useMemo(
+    () => listings.filter((l) => (listingFilter === 'all' || l.status === listingFilter) && (!q || l.title.toLowerCase().includes(q))),
+    [listings, listingFilter, q]
+  );
 
-  const lowStock = useMemo(() => inventory.filter((i) => i.inStock <= i.minStock), [inventory]);
+  const filteredInventory = useMemo(
+    () => inventory.filter((i) => {
+      const s = stockStatus(i).key;
+      const matchesFilter = stockFilter === 'all' || (stockFilter === 'low' ? s === 'low' : s === 'out');
+      return matchesFilter && (!q || i.title.toLowerCase().includes(q) || i.category.toLowerCase().includes(q));
+    }),
+    [inventory, stockFilter, q]
+  );
 
-  const filteredInventory = useMemo(() => {
-    if (!searchQuery.trim()) return inventory;
-    const q = searchQuery.toLowerCase();
-    return inventory.filter((i) => i.title.toLowerCase().includes(q) || i.category.toLowerCase().includes(q));
-  }, [inventory, searchQuery]);
+  const listingStats = useMemo(() => ({
+    active: listings.filter((l) => l.status === 'active').length,
+    draft: listings.filter((l) => l.status === 'draft').length,
+    sold: listings.filter((l) => l.status === 'sold').length,
+    value: listings.filter((l) => l.status === 'active').reduce((s, l) => s + l.price * l.quantity, 0),
+  }), [listings]);
 
-  const onRefresh = useMemo(() => () => {
-    setRefreshing(true);
-    setTimeout(() => setRefreshing(false), 800);
-  }, []);
+  const inventoryStats = useMemo(() => ({
+    units: inventory.reduce((s, i) => s + i.inStock, 0),
+    low: inventory.filter((i) => stockStatus(i).key === 'low').length,
+    out: inventory.filter((i) => i.inStock === 0).length,
+    profit: inventory.reduce((s, i) => s + (i.sellingPrice - i.costPrice) * i.inStock, 0),
+  }), [inventory]);
 
-  const inventoryStats = useMemo(() => {
-    const totalItems = inventory.reduce((s, i) => s + i.inStock, 0);
-    const totalCost = inventory.reduce((s, i) => s + i.costPrice * i.inStock, 0);
-    const totalValue = inventory.reduce((s, i) => s + i.sellingPrice * i.inStock, 0);
-    const potentialProfit = totalValue - totalCost;
-    return { totalItems, totalCost, totalValue, potentialProfit };
-  }, [inventory]);
+  const categoryProducts = useMemo(() => PRODUCTS.filter((p) => p.category === selectedCategory), [selectedCategory]);
+  const selectedProduct = PRODUCTS.find((p) => p.id === selectedProductId) ?? null;
 
-  const stats = useMemo(() => {
-    const total = MY_LISTINGS.length;
-    const active = MY_LISTINGS.filter((l) => l.status === 'active').length;
-    const sold = MY_LISTINGS.filter((l) => l.status === 'sold').length;
-    const totalValue = MY_LISTINGS.reduce((s, l) => s + l.price * l.quantity, 0);
-    return { total, active, sold, totalValue };
-  }, []);
-
-  const categories = useMemo(() => {
-    const cats = new Set(PRODUCTS.map((p) => p.category));
-    return Array.from(cats).map((c) => ({ label: c, value: c }));
-  }, []);
-
-  const filteredProducts = useMemo(() => {
-    if (!selectedCategory) return [];
-    return PRODUCTS.filter((p) => p.category === selectedCategory).map((p) => ({
-      label: p.name,
-      value: p.id,
-    }));
-  }, [selectedCategory]);
-
-  const selectedProduct = useMemo(() => {
-    if (!selectedProductId) return null;
-    return PRODUCTS.find((p) => p.id === selectedProductId) ?? null;
-  }, [selectedProductId]);
-
-  const openDropdown = (ref: React.RefObject<View>, setOpen: (v: boolean) => void, anim: Animated.Value) => {
-    ref.current?.measureInWindow((x, y, w) => {
-      setDropdownPos({ top: y + 32, left: x, width: w });
-      setOpen(true);
-      anim.setValue(0);
-      Animated.timing(anim, { toValue: 1, duration: 200, useNativeDriver: true }).start();
-    });
-  };
-
-  const resetAddForm = () => {
+  const closeAddSheet = () => {
+    setShowAddSheet(false);
     setSelectedCategory('');
     setSelectedProductId('');
     setAddQty('');
@@ -272,21 +337,19 @@ export default function MyListingsScreen() {
   };
 
   const handleAddToInventory = () => {
-    if (!selectedProduct || !addQty || !addCostPrice) {
-      Alert.alert('Missing Fields', 'Please select a product, quantity, and cost price.');
+    if (!selectedProduct || !Number(addQty) || !Number(addCostPrice)) {
+      Alert.alert('Missing details', 'Pick a product and enter quantity and cost price.');
       return;
     }
     const existing = inventory.find((i) => i.title === selectedProduct.name);
     if (existing) {
-      setInventory((prev) =>
-        prev.map((i) =>
-          i.title === selectedProduct.name
-            ? { ...i, inStock: i.inStock + Number(addQty), costPrice: Number(addCostPrice), lastRestocked: todaysDate() }
-            : i
-        )
-      );
+      setInventory((prev) => prev.map((i) =>
+        i.id === existing.id
+          ? { ...i, inStock: i.inStock + Number(addQty), costPrice: Number(addCostPrice), lastRestocked: todaysDate() }
+          : i
+      ));
     } else {
-      const newItem: InventoryItem = {
+      setInventory((prev) => [...prev, {
         id: 'inv-' + Date.now(),
         title: selectedProduct.name,
         emoji: selectedProduct.imageEmoji,
@@ -297,1031 +360,537 @@ export default function MyListingsScreen() {
         costPrice: Number(addCostPrice),
         sellingPrice: selectedProduct.price,
         lastRestocked: todaysDate(),
-      };
-      setInventory((prev) => [...prev, newItem]);
+      }]);
     }
-    setShowAddModal(false);
-    resetAddForm();
+    closeAddSheet();
   };
 
-  const handleRemoveItem = (item: InventoryItem) => {
-    Alert.alert('Remove from Inventory', `Remove "${item.title}" from your stock?`, [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Remove', style: 'destructive', onPress: () => setInventory((prev) => prev.filter((i) => i.id !== item.id)) },
-    ]);
-  };
-
-  const handleRestock = () => {
-    if (!restockTarget || !restockQty) return;
-    setInventory((prev) =>
-      prev.map((i) =>
-        i.id === restockTarget.id
-          ? { ...i, inStock: i.inStock + Number(restockQty), lastRestocked: todaysDate() }
-          : i
-      )
-    );
-    setShowRestockModal(false);
+  const closeRestock = () => {
     setRestockTarget(null);
     setRestockQty('');
   };
 
-  useEffect(() => {
-    if (!showAddModal) {
-      setCatDropdownOpen(false);
-      setProdDropdownOpen(false);
-      resetAddForm();
-    }
-  }, [showAddModal]);
-
-  useEffect(() => {
-    setSelectedProductId('');
-  }, [selectedCategory]);
-
-  const handleUpdateStock = (item: InventoryItem, delta: number) => {
-    setInventory((prev) =>
-      prev.map((i) =>
-        i.id === item.id ? { ...i, inStock: Math.max(0, i.inStock + delta) } : i
-      )
-    );
+  const handleRestock = () => {
+    if (!restockTarget || !Number(restockQty)) return;
+    setInventory((prev) => prev.map((i) =>
+      i.id === restockTarget.id ? { ...i, inStock: i.inStock + Number(restockQty), lastRestocked: todaysDate() } : i
+    ));
+    closeRestock();
   };
 
-  return (
-    <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={Platform.OS === 'ios' ? 120 : 0}>
-    <View style={styles.container}>
-      <Stack.Screen options={{ headerTitle: 'My Store' }} />
+  const handleUpdateStock = (item: InventoryItem, delta: number) =>
+    setInventory((prev) => prev.map((i) => (i.id === item.id ? { ...i, inStock: Math.max(0, i.inStock + delta) } : i)));
 
-      <View style={styles.tabBar}>
-        {TABS.map((tab) => (
-          <TouchableOpacity key={tab.key} style={[styles.tab, activeTab === tab.key && styles.tabActive]} onPress={() => { setActiveTab(tab.key); setActiveFilter('all'); }} activeOpacity={0.7}>
-            <MaterialIcons name={tab.icon as any} size={18} color={activeTab === tab.key ? Colors.primaryGreen : Colors.textLight} />
-            <Text style={[styles.tabLabel, activeTab === tab.key && styles.tabLabelActive]}>{tab.label}</Text>
-          </TouchableOpacity>
-        ))}
+  const handleRemoveItem = (item: InventoryItem) =>
+    Alert.alert('Remove from inventory', `Remove "${item.title}" from your stock?`, [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Remove', style: 'destructive', onPress: () => setInventory((prev) => prev.filter((i) => i.id !== item.id)) },
+    ]);
+
+  const handleAdvanceListing = (item: Listing) =>
+    setListings((prev) => prev.map((l) => (l.id === item.id ? { ...l, status: l.status === 'draft' ? 'active' : 'sold' } : l)));
+
+  const handleDeleteListing = (item: Listing) =>
+    Alert.alert('Delete listing', `Delete "${item.title}"? Buyers will no longer see it.`, [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Delete', style: 'destructive', onPress: () => setListings((prev) => prev.filter((l) => l.id !== item.id)) },
+    ]);
+
+  const isListings = activeTab === 'listings';
+  const activeFilter = isListings ? listingFilter : stockFilter;
+
+  const header = (
+    <>
+      <View style={styles.statsRow}>
+        {isListings ? (
+          <>
+            <StatCard label="Active" value={String(listingStats.active)} accent={Colors.primary} sub={`${listingStats.draft} drafts`} />
+            <StatCard label="Sold" value={String(listingStats.sold)} accent={Colors.secondary} />
+            <StatCard label="Live value" value={compact(listingStats.value)} accent={Colors.tertiary} />
+          </>
+        ) : (
+          <>
+            <StatCard label="Units" value={inventoryStats.units.toLocaleString('en-NG')} accent={Colors.primary} />
+            <StatCard label="Low stock" value={String(inventoryStats.low)} accent={inventoryStats.low ? Colors.error : Colors.outline} sub={inventoryStats.out ? `${inventoryStats.out} out` : undefined} />
+            <StatCard label="Profit" value={compact(inventoryStats.profit)} accent={Colors.tertiary} />
+          </>
+        )}
       </View>
 
-      {activeTab === 'listings' ? (
-        <FlatList
-          data={filtered}
-          keyExtractor={(item) => item.id}
-          contentContainerStyle={[styles.list, { paddingBottom: 20 + insets.bottom }]}
-          showsVerticalScrollIndicator={false}
-          ListHeaderComponent={
-            <>
-              <View style={styles.statsRow}>
-                <View style={styles.statCard}>
-                  <Text style={styles.statNum}>{stats.total}</Text>
-                  <Text style={styles.statLbl}>Total</Text>
-                </View>
-                <View style={styles.statCard}>
-                  <Text style={[styles.statNum, { color: Colors.primary }]}>{stats.active}</Text>
-                  <Text style={styles.statLbl}>Active</Text>
-                </View>
-                <View style={styles.statCard}>
-                  <Text style={[styles.statNum, { color: Colors.secondary }]}>{stats.sold}</Text>
-                  <Text style={styles.statLbl}>Sold</Text>
-                </View>
-                <View style={styles.statCard}>
-                  <Text style={[styles.statNum, { color: Colors.primaryGreen, fontSize: 13 }]}>{formatPrice(stats.totalValue)}</Text>
-                  <Text style={styles.statLbl}>Value</Text>
-                </View>
-              </View>
-              <TouchableOpacity style={styles.addBtn} activeOpacity={0.7} onPress={() => router.push('/add-listing')}>
-                <MaterialIcons name="add" size={18} color="#fff" />
-                <Text style={styles.addBtnText}>Add New Listing</Text>
-              </TouchableOpacity>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterRow} contentContainerStyle={styles.filterContent}>
-                {FILTERS.map((f) => {
-                  const active = activeFilter === f.key;
-                  return (
-                    <TouchableOpacity key={f.key} style={[styles.filterChip, active && styles.filterChipActive]} onPress={() => setActiveFilter(f.key)} activeOpacity={0.7}>
-                      <MaterialIcons name={f.icon as any} size={14} color={active ? '#fff' : Colors.textMedium} />
-                      <Text style={[styles.filterChipText, active && styles.filterChipTextActive]}>{f.label}</Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </ScrollView>
-            </>
-          }
-          renderItem={({ item }) => {
-            const meta = STATUS_META[item.status];
-            return (
-              <TouchableOpacity style={styles.card} activeOpacity={0.8}>
-                <View style={styles.cardLeft}>
-                  <Text style={styles.cardEmoji}>{item.emoji}</Text>
-                </View>
-                <View style={styles.cardBody}>
-                  <View style={styles.cardTopRow}>
-                    <Text style={styles.cardTitle} numberOfLines={1}>{item.title}</Text>
-                    <View style={[styles.badge, { backgroundColor: meta.bg }]}>
-                      <Text style={[styles.badgeText, { color: meta.color }]}>{meta.label}</Text>
-                    </View>
-                  </View>
-                  <Text style={styles.cardPrice}>{formatPrice(item.price)} <Text style={styles.cardPerUnit}>/ {item.unit}</Text></Text>
-                  <View style={styles.cardMeta}>
-                    <View style={styles.metaItem}>
-                      <MaterialIcons name="inventory-2" size={12} color={Colors.textLight} />
-                      <Text style={styles.metaText}>{item.quantity} {item.unit}(s)</Text>
-                    </View>
-                    <View style={styles.metaItem}>
-                      <MaterialIcons name="visibility" size={12} color={Colors.textLight} />
-                      <Text style={styles.metaText}>{item.views} views</Text>
-                    </View>
-                    <View style={styles.metaItem}>
-                      <MaterialIcons name="forum" size={12} color={Colors.textLight} />
-                      <Text style={styles.metaText}>{item.inquiries} inquiries</Text>
-                    </View>
-                  </View>
-                  <View style={styles.cardFooter}>
-                    <Text style={styles.cardDate}>{item.date}</Text>
-                    <View style={styles.actionBtns}>
-                      <TouchableOpacity style={styles.actionBtn} activeOpacity={0.6}>
-                        <MaterialIcons name="edit" size={15} color={Colors.textMedium} />
-                      </TouchableOpacity>
-                      <TouchableOpacity style={styles.actionBtn} activeOpacity={0.6} onPress={() => Alert.alert('Delete', 'Are you sure you want to delete this listing?')}>
-                        <MaterialIcons name="delete-outline" size={15} color={Colors.error} />
-                      </TouchableOpacity>
-                    </View>
-                  </View>
-                </View>
-              </TouchableOpacity>
-            );
-          }}
-          ListEmptyComponent={
-            <View style={styles.empty}>
-              <View style={styles.emptyIconWrap}>
-                <MaterialIcons name="storefront" size={44} color={Colors.border} />
-              </View>
-              <Text style={styles.emptyTitle}>No {activeFilter !== 'all' ? activeFilter : ''} listings</Text>
-              <Text style={styles.emptySub}>
-                {activeFilter === 'all' ? 'Start selling by adding your first listing' : `You have no ${activeFilter} listings`}
-              </Text>
-              {activeFilter !== 'all' && (
-                <TouchableOpacity style={styles.clearFilterBtn} onPress={() => setActiveFilter('all')}>
-                  <Text style={styles.clearFilterText}>Clear filter</Text>
-                </TouchableOpacity>
-              )}
-            </View>
-          }
+      <View style={styles.searchBar}>
+        <MaterialIcons name="search" size={20} color={Colors.outline} />
+        <TextInput
+          style={styles.searchInput}
+          placeholder={isListings ? 'Search listings' : 'Search products or categories'}
+          placeholderTextColor={Colors.outline}
+          value={query}
+          onChangeText={setQuery}
+        />
+        {query.length > 0 && (
+          <TouchableOpacity onPress={() => setQuery('')} hitSlop={8}>
+            <MaterialIcons name="close" size={18} color={Colors.outline} />
+          </TouchableOpacity>
+        )}
+      </View>
+
+      {isListings ? (
+        <Chips
+          value={listingFilter}
+          onSelect={setListingFilter}
+          options={[
+            { key: 'all', label: 'All', count: listings.length },
+            { key: 'active', label: 'Active', count: listingStats.active },
+            { key: 'draft', label: 'Drafts', count: listingStats.draft },
+            { key: 'sold', label: 'Sold', count: listingStats.sold },
+          ]}
         />
       ) : (
-        <View style={{ flex: 1 }}>
-          <FlatList
-            data={filteredInventory}
-            keyExtractor={(item) => item.id}
-            contentContainerStyle={[styles.list, { paddingBottom: 140 + insets.bottom }]}
-            showsVerticalScrollIndicator={false}
-            refreshing={refreshing}
-            onRefresh={onRefresh}
-            ListHeaderComponent={
-              <>
-                <View style={styles.invStatsRow}>
-                  <View style={styles.invStatCard}>
-                    <Text style={styles.invStatNum}>{inventoryStats.totalItems}</Text>
-                    <Text style={styles.invStatLabel}>Total Units</Text>
-                  </View>
-                  <View style={styles.invStatCard}>
-                    <Text style={styles.invStatNum}>{formatPrice(inventoryStats.totalCost)}</Text>
-                    <Text style={styles.invStatLabel}>Cost</Text>
-                  </View>
-                  <View style={[styles.invStatCard, { borderColor: Colors.primaryGreen + '30', borderWidth: 1 }]}>
-                    <Text style={[styles.invStatNum, { color: Colors.primaryGreen }]}>{formatPrice(inventoryStats.potentialProfit)}</Text>
-                    <Text style={styles.invStatLabel}>Profit</Text>
-                  </View>
-                </View>
+        <Chips
+          value={stockFilter}
+          onSelect={setStockFilter}
+          options={[
+            { key: 'all', label: 'All', count: inventory.length },
+            { key: 'low', label: 'Low stock', count: inventoryStats.low },
+            { key: 'out', label: 'Out of stock', count: inventoryStats.out },
+          ]}
+        />
+      )}
+    </>
+  );
 
-                {lowStock.length > 0 && (
-                  <View style={styles.alertBanner}>
-                    <MaterialIcons name="warning" size={18} color={Colors.error} />
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.alertTitle}>{lowStock.length} product{lowStock.length > 1 ? 's' : ''} low in stock</Text>
-                      <Text style={styles.alertText}>Restock soon to avoid running out</Text>
-                    </View>
-                  </View>
-                )}
+  const empty = (
+    <View style={styles.empty}>
+      <View style={styles.emptyIcon}>
+        <MaterialIcons name={isListings ? 'storefront' : 'inventory-2'} size={36} color={Colors.outline} />
+      </View>
+      <Text style={styles.emptyTitle}>{q || activeFilter !== 'all' ? 'Nothing matches' : isListings ? 'No listings yet' : 'No stock yet'}</Text>
+      <Text style={styles.emptySub}>
+        {q || activeFilter !== 'all' ? 'Try a different search or filter.' : isListings ? 'Create your first listing to start selling.' : 'Add products to track your stock.'}
+      </Text>
+      {(q || activeFilter !== 'all') && (
+        <TouchableOpacity
+          style={styles.clearBtn}
+          onPress={() => { setQuery(''); isListings ? setListingFilter('all') : setStockFilter('all'); }}
+        >
+          <Text style={styles.clearText}>Clear filters</Text>
+        </TouchableOpacity>
+      )}
+    </View>
+  );
 
-                <View style={styles.searchBar}>
-                  <MaterialIcons name="search" size={18} color={Colors.textLight} />
-                  <TextInput
-                    style={styles.searchInput}
-                    placeholder="Search products..."
-                    placeholderTextColor={Colors.textMuted}
-                    value={searchQuery}
-                    onChangeText={setSearchQuery}
-                  />
-                  {searchQuery.length > 0 && (
-                    <TouchableOpacity onPress={() => setSearchQuery('')} activeOpacity={0.6}>
-                      <MaterialIcons name="close" size={16} color={Colors.textLight} />
-                    </TouchableOpacity>
-                  )}
-                </View>
+  const listProps = {
+    contentContainerStyle: [styles.list, { paddingBottom: 104 + insets.bottom }],
+    showsVerticalScrollIndicator: false,
+    keyboardShouldPersistTaps: 'handled' as const,
+    ListHeaderComponent: header,
+    ListEmptyComponent: empty,
+  };
 
-                <View style={styles.sectionRow}>
-                  <Text style={styles.sectionHeader}>All Products</Text>
-                  <Text style={styles.sectionCount}>{filteredInventory.length} item{filteredInventory.length !== 1 ? 's' : ''}</Text>
+  const restockAfter = restockTarget ? restockTarget.inStock + (Number(restockQty) || 0) : 0;
+
+  return (
+    <View style={styles.container}>
+      <Stack.Screen options={{ headerTitle: 'My Store', headerShadowVisible: false, headerStyle: { backgroundColor: Colors.background } }} />
+
+      <View style={styles.segment}>
+        {TABS.map((tab) => {
+          const active = activeTab === tab.key;
+          return (
+            <TouchableOpacity
+              key={tab.key}
+              style={[styles.segmentItem, active && styles.segmentItemActive]}
+              onPress={() => { setActiveTab(tab.key); setQuery(''); }}
+              activeOpacity={0.7}
+            >
+              <MaterialIcons name={tab.icon} size={18} color={active ? Colors.onPrimary : Colors.onSurfaceVariant} />
+              <Text style={[styles.segmentText, active && styles.segmentTextActive]}>{tab.label}</Text>
+              {tab.key === 'inventory' && inventoryStats.low + inventoryStats.out > 0 && (
+                <View style={styles.segmentBadge}>
+                  <Text style={styles.segmentBadgeText}>{inventoryStats.low + inventoryStats.out}</Text>
                 </View>
-              </>
-            }
-            renderItem={({ item, index }) => (
+              )}
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+
+      {isListings ? (
+        <FlatList
+          key="listings"
+          data={filteredListings}
+          keyExtractor={(item) => item.id}
+          renderItem={({ item, index }) => (
+            <FadeIn index={index}>
+              <ListingCard item={item} onAdvance={handleAdvanceListing} onDelete={handleDeleteListing} />
+            </FadeIn>
+          )}
+          {...listProps}
+        />
+      ) : (
+        <FlatList
+          key="inventory"
+          data={filteredInventory}
+          keyExtractor={(item) => item.id}
+          renderItem={({ item, index }) => (
+            <FadeIn index={index}>
               <InventoryCard
                 item={item}
-                index={index}
                 onUpdateStock={handleUpdateStock}
                 onRemove={handleRemoveItem}
-                onRestock={(i) => { setRestockTarget(i); setRestockQty(''); setShowRestockModal(true); }}
+                onRestock={(i) => { setRestockTarget(i); setRestockQty(''); }}
               />
-            )}
-            ListFooterComponent={<View style={{ height: 20 }} />}
-          />
-
-          <TouchableOpacity
-            style={[styles.fab, { bottom: 86 + insets.bottom }]}
-            activeOpacity={0.85}
-            onPress={() => setShowAddModal(true)}
-          >
-            <MaterialIcons name="add" size={22} color="#fff" />
-            <Text style={styles.fabLabel}>Add to Stock</Text>
-          </TouchableOpacity>
-        </View>
+            </FadeIn>
+          )}
+          {...listProps}
+        />
       )}
 
-      {/* Add to Stock Modal */}
-      <Modal visible={showAddModal} transparent animationType="slide" onRequestClose={() => setShowAddModal(false)}>
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Add to Stock</Text>
-              <TouchableOpacity onPress={() => setShowAddModal(false)}>
-                <MaterialIcons name="close" size={22} color={Colors.textMedium} />
-              </TouchableOpacity>
+      <View style={[styles.footer, { paddingBottom: Math.max(16, insets.bottom + 8) }]}>
+        <TouchableOpacity
+          style={styles.cta}
+          activeOpacity={0.8}
+          onPress={() => (isListings ? router.push('/add-listing') : setShowAddSheet(true))}
+        >
+          <MaterialIcons name="add" size={20} color={Colors.onSecondary} />
+          <Text style={styles.ctaText}>{isListings ? 'New listing' : 'Add stock'}</Text>
+        </TouchableOpacity>
+      </View>
+
+      <Sheet visible={showAddSheet} title="Add to stock" onClose={closeAddSheet}>
+        <ScrollView style={styles.sheetScroll} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+          <Text style={styles.label}>Category</Text>
+          <Chips
+            value={selectedCategory}
+            onSelect={(c) => { setSelectedCategory(c); setSelectedProductId(''); }}
+            options={CATEGORIES.map((c) => ({ key: c, label: c }))}
+          />
+
+          {selectedCategory !== '' && (
+            <>
+              <Text style={[styles.label, styles.labelGap]}>Product</Text>
+              {categoryProducts.map((p) => {
+                const active = p.id === selectedProductId;
+                return (
+                  <TouchableOpacity key={p.id} style={[styles.productRow, active && styles.productRowActive]} onPress={() => setSelectedProductId(p.id)} activeOpacity={0.7}>
+                    <Text style={styles.productEmoji}>{p.imageEmoji}</Text>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.productName} numberOfLines={1}>{p.name}</Text>
+                      <Text style={styles.productPrice}>{formatPrice(p.price)} / {p.unit}</Text>
+                    </View>
+                    <MaterialIcons name={active ? 'radio-button-checked' : 'radio-button-unchecked'} size={20} color={active ? Colors.primary : Colors.outlineVariant} />
+                  </TouchableOpacity>
+                );
+              })}
+            </>
+          )}
+
+          <View style={[styles.fieldRow, styles.labelGap]}>
+            <View style={styles.field}>
+              <Text style={styles.label}>Quantity</Text>
+              <TextInput style={styles.input} placeholder="50" placeholderTextColor={Colors.outline} keyboardType="number-pad" value={addQty} onChangeText={(t) => setAddQty(t.replace(/\D/g, ''))} />
             </View>
-
-            <ScrollView style={{ maxHeight: 500 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-              {/* Category Dropdown */}
-              <Text style={styles.inputLabel}>Category</Text>
-              <View ref={catBtnRef} collapsable={false}>
-                <TouchableOpacity style={styles.dropdownBtn} onPress={() => openDropdown(catBtnRef, setCatDropdownOpen, catSlideAnim)} activeOpacity={0.7}>
-                  <Text style={[styles.dropdownText, !selectedCategory && { color: Colors.textMuted }]}>
-                    {selectedCategory || 'Select category'}
-                  </Text>
-                  <MaterialIcons name="unfold-more" size={18} color={Colors.textLight} />
-                </TouchableOpacity>
-              </View>
-
-              {/* Product Dropdown */}
-              <Text style={[styles.inputLabel, { marginTop: 14 }]}>Product</Text>
-              <View ref={prodBtnRef} collapsable={false}>
-                <TouchableOpacity
-                  style={[styles.dropdownBtn, !selectedCategory && { opacity: 0.4 }]}
-                  onPress={() => selectedCategory && openDropdown(prodBtnRef, setProdDropdownOpen, prodSlideAnim)}
-                  activeOpacity={0.7}
-                >
-                  <Text style={[styles.dropdownText, !selectedProductId && { color: Colors.textMuted }]} numberOfLines={1}>
-                    {selectedProduct ? selectedProduct.name : 'Select product'}
-                  </Text>
-                  <MaterialIcons name="unfold-more" size={18} color={Colors.textLight} />
-                </TouchableOpacity>
-              </View>
-
-              {selectedProduct && (
-                <View style={styles.selectedPreview}>
-                  <Text style={styles.selectedPreviewEmoji}>{selectedProduct.imageEmoji}</Text>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.selectedPreviewName}>{selectedProduct.name}</Text>
-                    <Text style={styles.selectedPreviewDetail}>
-                      {formatPrice(selectedProduct.price)} / {selectedProduct.unit}  •  {selectedProduct.category}
-                    </Text>
-                  </View>
-                </View>
-              )}
-
-              {/* Quantity */}
-              <Text style={[styles.inputLabel, { marginTop: 14 }]}>Quantity</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="e.g. 50"
-                placeholderTextColor={Colors.textMuted}
-                keyboardType="number-pad"
-                value={addQty}
-                onChangeText={setAddQty}
-              />
-
-              {/* Cost Price */}
-              <Text style={[styles.inputLabel, { marginTop: 14 }]}>Cost Price (per unit)</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="e.g. 6200"
-                placeholderTextColor={Colors.textMuted}
-                keyboardType="number-pad"
-                value={addCostPrice}
-                onChangeText={setAddCostPrice}
-              />
-
-              {/* Min Stock */}
-              <Text style={[styles.inputLabel, { marginTop: 14 }]}>Minimum Stock Level</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="e.g. 20"
-                placeholderTextColor={Colors.textMuted}
-                keyboardType="number-pad"
-                value={addMinStock}
-                onChangeText={setAddMinStock}
-              />
-
-              <TouchableOpacity style={styles.modalSubmit} activeOpacity={0.7} onPress={handleAddToInventory}>
-                <MaterialIcons name="inventory-2" size={18} color="#fff" />
-                <Text style={styles.modalSubmitText}>Add to Stock</Text>
-              </TouchableOpacity>
-            </ScrollView>
+            <View style={styles.field}>
+              <Text style={styles.label}>Min. level</Text>
+              <TextInput style={styles.input} placeholder="10" placeholderTextColor={Colors.outline} keyboardType="number-pad" value={addMinStock} onChangeText={(t) => setAddMinStock(t.replace(/\D/g, ''))} />
+            </View>
           </View>
-        </KeyboardAvoidingView>
-      </Modal>
 
-      {/* Category Dropdown Overlay */}
-      <Modal visible={catDropdownOpen} transparent onRequestClose={() => setCatDropdownOpen(false)}>
-        <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => setCatDropdownOpen(false)}>
-          <Animated.View style={[styles.dropdownOverlay, { top: dropdownPos.top, left: dropdownPos.left, width: dropdownPos.width, opacity: catSlideAnim }]}>
-            <ScrollView style={{ maxHeight: 200 }}>
-              {categories.map((cat) => (
-                <TouchableOpacity
-                  key={cat.value}
-                  style={[styles.dropdownItem, selectedCategory === cat.value && styles.dropdownItemActive]}
-                  onPress={() => { setSelectedCategory(cat.value); setCatDropdownOpen(false); }}
-                  activeOpacity={0.6}
-                >
-                  <Text style={[styles.dropdownItemText, selectedCategory === cat.value && styles.dropdownItemTextActive]}>{cat.label}</Text>
-                  {selectedCategory === cat.value && <MaterialIcons name="check" size={16} color={Colors.primaryGreen} />}
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-          </Animated.View>
-        </TouchableOpacity>
-      </Modal>
+          <Text style={[styles.label, styles.labelGap]}>Cost price per {selectedProduct?.unit ?? 'unit'}</Text>
+          <View style={styles.currencyInput}>
+            <Text style={styles.currencySymbol}>₦</Text>
+            <TextInput
+              style={styles.currencyField}
+              placeholder="6,200"
+              placeholderTextColor={Colors.outline}
+              keyboardType="number-pad"
+              value={Number(addCostPrice) ? Number(addCostPrice).toLocaleString('en-NG') : ''}
+              onChangeText={(t) => setAddCostPrice(t.replace(/\D/g, ''))}
+            />
+          </View>
+          {selectedProduct && Number(addCostPrice) > 0 && (
+            <Text style={styles.hint}>
+              Sells at {formatPrice(selectedProduct.price)} · {Math.round(((selectedProduct.price - Number(addCostPrice)) / Number(addCostPrice)) * 100)}% margin
+            </Text>
+          )}
 
-      {/* Product Dropdown Overlay */}
-      <Modal visible={prodDropdownOpen} transparent onRequestClose={() => setProdDropdownOpen(false)}>
-        <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => setProdDropdownOpen(false)}>
-          <Animated.View style={[styles.dropdownOverlay, { top: dropdownPos.top, left: dropdownPos.left, width: dropdownPos.width, opacity: prodSlideAnim }]}>
-            <ScrollView style={{ maxHeight: 220 }}>
-              {filteredProducts.map((p) => (
-                <TouchableOpacity
-                  key={p.value}
-                  style={[styles.dropdownItem, selectedProductId === p.value && styles.dropdownItemActive]}
-                  onPress={() => { setSelectedProductId(p.value); setProdDropdownOpen(false); }}
-                  activeOpacity={0.6}
-                >
-                  <Text style={[styles.dropdownItemText, selectedProductId === p.value && styles.dropdownItemTextActive]} numberOfLines={1}>{p.label}</Text>
-                  {selectedProductId === p.value && <MaterialIcons name="check" size={16} color={Colors.primaryGreen} />}
-                </TouchableOpacity>
-              ))}
-              {filteredProducts.length === 0 && (
-                <Text style={styles.dropdownEmpty}>No products in this category</Text>
-              )}
-            </ScrollView>
-          </Animated.View>
-        </TouchableOpacity>
-      </Modal>
+          <TouchableOpacity style={[styles.cta, styles.sheetCta]} activeOpacity={0.8} onPress={handleAddToInventory}>
+            <Text style={styles.ctaText}>Add to stock</Text>
+          </TouchableOpacity>
+        </ScrollView>
+      </Sheet>
 
-      {/* Restock Modal */}
-      <Modal visible={showRestockModal} transparent animationType="fade" onRequestClose={() => setShowRestockModal(false)}>
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.modalOverlay}>
-          <View style={[styles.modalContent, { maxWidth: 320, alignSelf: 'center' }]}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Restock</Text>
-              <TouchableOpacity onPress={() => setShowRestockModal(false)}>
-                <MaterialIcons name="close" size={22} color={Colors.textMedium} />
-              </TouchableOpacity>
+      <Sheet visible={!!restockTarget} title="Restock" onClose={closeRestock}>
+        {restockTarget && (
+          <>
+            <View style={styles.restockItem}>
+              <Text style={styles.productEmoji}>{restockTarget.emoji}</Text>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.productName} numberOfLines={1}>{restockTarget.title}</Text>
+                <Text style={styles.productPrice}>Now {restockTarget.inStock} {restockTarget.unit} · min. {restockTarget.minStock}</Text>
+              </View>
             </View>
-            {restockTarget && (
-              <>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 14 }}>
-                  <Text style={{ fontSize: 24 }}>{restockTarget.emoji}</Text>
-                  <Text style={{ fontSize: 13, fontWeight: '700', color: Colors.textDark, flex: 1 }}>{restockTarget.title}</Text>
-                </View>
-                <Text style={styles.inputLabel}>Current stock: {restockTarget.inStock} {restockTarget.unit}(s)</Text>
-                <Text style={[styles.inputLabel, { marginTop: 8 }]}>Add quantity</Text>
-                <TextInput
-                  style={[styles.input, { fontSize: 20, fontWeight: '800', textAlign: 'center' }]}
-                  placeholder="0"
-                  placeholderTextColor={Colors.textMuted}
-                  keyboardType="number-pad"
-                  value={restockQty}
-                  onChangeText={setRestockQty}
-                />
-                <TouchableOpacity style={[styles.modalSubmit, { marginTop: 16 }]} activeOpacity={0.7} onPress={handleRestock}>
-                  <MaterialIcons name="restart-alt" size={18} color="#fff" />
-                  <Text style={styles.modalSubmitText}>Confirm Restock</Text>
+
+            <Text style={styles.label}>Add quantity</Text>
+            <TextInput
+              style={[styles.input, styles.bigInput]}
+              placeholder="0"
+              placeholderTextColor={Colors.outline}
+              keyboardType="number-pad"
+              value={restockQty}
+              onChangeText={(t) => setRestockQty(t.replace(/\D/g, ''))}
+              autoFocus
+            />
+            <View style={styles.quickRow}>
+              {QUICK_RESTOCK.map((n) => (
+                <TouchableOpacity key={n} style={styles.chip} onPress={() => setRestockQty(String((Number(restockQty) || 0) + n))} activeOpacity={0.7}>
+                  <Text style={styles.chipText}>+{n}</Text>
                 </TouchableOpacity>
-              </>
+              ))}
+            </View>
+            {Number(restockQty) > 0 && (
+              <Text style={styles.hint}>New stock level: {restockAfter} {restockTarget.unit}</Text>
             )}
-          </View>
-        </KeyboardAvoidingView>
-      </Modal>
+
+            <TouchableOpacity
+              style={[styles.cta, styles.sheetCta, !Number(restockQty) && styles.ctaDisabled]}
+              activeOpacity={0.8}
+              onPress={handleRestock}
+              disabled={!Number(restockQty)}
+            >
+              <Text style={styles.ctaText}>Confirm restock</Text>
+            </TouchableOpacity>
+          </>
+        )}
+      </Sheet>
     </View>
-    </KeyboardAvoidingView>
   );
 }
 
+const shadow = {
+  shadowColor: '#1b1c1c',
+  shadowOffset: { width: 0, height: 1 },
+  shadowOpacity: 0.05,
+  shadowRadius: 4,
+  elevation: 1,
+};
+
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
-  list: { padding: 20, paddingBottom: 32 },
+  list: { paddingHorizontal: 16 },
 
-  tabBar: {
+  segment: {
     flexDirection: 'row',
-    backgroundColor: Colors.card,
-    marginHorizontal: 20,
-    marginTop: 16,
-    borderRadius: 12,
-    padding: 3,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.04,
-    shadowRadius: 3,
-    elevation: 2,
+    marginHorizontal: 16,
+    marginTop: 8,
+    padding: 4,
+    gap: 4,
+    borderRadius: 999,
+    backgroundColor: Colors.surfaceVariant + '99',
   },
-  tab: {
+  segmentItem: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
-    paddingVertical: 10,
+    height: 40,
+    borderRadius: 999,
+  },
+  segmentItemActive: { backgroundColor: Colors.primary },
+  segmentText: { fontSize: 14, fontWeight: '600', color: Colors.onSurfaceVariant },
+  segmentTextActive: { color: Colors.onPrimary },
+  segmentBadge: {
+    minWidth: 20,
+    height: 20,
+    paddingHorizontal: 6,
     borderRadius: 10,
+    backgroundColor: Colors.error,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  tabActive: {
-    backgroundColor: Colors.primaryGreen + '12',
-  },
-  tabLabel: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: Colors.textLight,
-  },
-  tabLabelActive: {
-    color: Colors.primaryGreen,
-    fontWeight: '700',
-  },
+  segmentBadgeText: { fontSize: 11, fontWeight: '700', color: '#fff' },
 
-  statsRow: {
-    flexDirection: 'row',
-    gap: 8,
-    marginTop: 16,
-    marginBottom: 12,
-  },
+  statsRow: { flexDirection: 'row', gap: 8, marginTop: 16, marginBottom: 16 },
   statCard: {
     flex: 1,
     backgroundColor: Colors.card,
-    borderRadius: 12,
-    paddingVertical: 12,
-    alignItems: 'center',
-    gap: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.04,
-    shadowRadius: 3,
-    elevation: 2,
-  },
-  statNum: {
-    fontSize: 16,
-    fontWeight: '800',
-    color: Colors.textDark,
-  },
-  statLbl: {
-    fontSize: 9,
-    fontWeight: '600',
-    color: Colors.textLight,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-
-  addBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    backgroundColor: Colors.primaryGreen,
-    paddingVertical: 12,
-    borderRadius: 12,
-    marginBottom: 14,
-  },
-  addBtnText: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#fff',
-  },
-
-  filterRow: { marginBottom: 16 },
-  filterContent: { gap: 8 },
-  filterChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 99,
-    backgroundColor: Colors.card,
-    borderWidth: 1,
-    borderColor: Colors.outlineVariant,
-  },
-  filterChipActive: {
-    backgroundColor: Colors.primaryGreen,
-    borderColor: Colors.primaryGreen,
-  },
-  filterChipText: { fontSize: 12, fontWeight: '600', color: Colors.textMedium },
-  filterChipTextActive: { color: '#fff' },
-
-  card: {
-    flexDirection: 'row',
-    backgroundColor: Colors.card,
-    borderRadius: 14,
-    padding: 14,
-    marginBottom: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 2,
-    gap: 12,
-  },
-  cardLeft: {
-    width: 52,
-    height: 52,
-    borderRadius: 12,
-    backgroundColor: Colors.surface,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  cardEmoji: { fontSize: 26 },
-  cardBody: { flex: 1 },
-  cardTopRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  cardTitle: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: Colors.textDark,
-    flex: 1,
-  },
-  cardPrice: {
-    fontSize: 16,
-    fontWeight: '800',
-    color: Colors.primaryGreen,
-    marginTop: 2,
-  },
-  cardPerUnit: { fontSize: 11, fontWeight: '500', color: Colors.textLight },
-  cardMeta: {
-    flexDirection: 'row',
-    gap: 12,
-    marginTop: 4,
-  },
-  metaItem: { flexDirection: 'row', alignItems: 'center', gap: 3 },
-  metaText: { fontSize: 10, color: Colors.textLight, fontWeight: '500' },
-  cardFooter: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginTop: 8,
-  },
-  cardDate: { fontSize: 10, color: Colors.textMuted },
-  actionBtns: { flexDirection: 'row', gap: 4 },
-  actionBtn: {
-    width: 30,
-    height: 30,
     borderRadius: 8,
-    backgroundColor: Colors.surface,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  badge: {
-    paddingHorizontal: 7,
-    paddingVertical: 2,
-    borderRadius: 99,
-  },
-  badgeText: { fontSize: 9, fontWeight: '700' },
-
-  invStatsRow: {
-    flexDirection: 'row',
-    gap: 8,
-    marginTop: 16,
-    marginBottom: 12,
-  },
-  invStatCard: {
-    flex: 1,
-    backgroundColor: Colors.card,
-    borderRadius: 12,
+    borderLeftWidth: 4,
     paddingVertical: 12,
-    alignItems: 'center',
-    gap: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.04,
-    shadowRadius: 3,
-    elevation: 2,
+    paddingHorizontal: 12,
+    ...shadow,
   },
-  invStatNum: {
-    fontSize: 13,
-    fontWeight: '800',
-    color: Colors.textDark,
-  },
-  invStatLabel: {
-    fontSize: 9,
-    fontWeight: '600',
-    color: Colors.textLight,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-
-  alertBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    backgroundColor: Colors.error + '0d',
-    borderRadius: 12,
-    padding: 12,
-    marginBottom: 16,
-    borderLeftWidth: 3,
-    borderLeftColor: Colors.error,
-  },
-  alertTitle: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: Colors.textDark,
-  },
-  alertText: {
-    fontSize: 11,
-    color: Colors.textMuted,
-  },
+  statLabel: { fontSize: 11, fontWeight: '600', color: Colors.outline, textTransform: 'uppercase', letterSpacing: 0.5 },
+  statValue: { fontSize: 22, fontWeight: '700', marginTop: 4 },
+  statSub: { fontSize: 12, color: Colors.outline, marginTop: 2 },
 
   searchBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
+    gap: 8,
+    height: 48,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: Colors.outlineVariant,
     backgroundColor: Colors.card,
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    height: 44,
-    marginBottom: 14,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.04,
-    shadowRadius: 3,
-    elevation: 2,
-  },
-  searchInput: {
-    flex: 1,
-    fontSize: 14,
-    fontWeight: '500',
-    color: Colors.textDark,
-    paddingVertical: 0,
-  },
-  sectionRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
     marginBottom: 12,
   },
-  sectionHeader: {
-    fontSize: 14,
-    fontWeight: '800',
-    color: Colors.textDark,
-  },
-  sectionCount: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: Colors.textLight,
-  },
+  searchInput: { flex: 1, fontSize: 16, color: Colors.onSurface, paddingVertical: 0 },
 
-  invCard: {
+  chipRow: { gap: 8, paddingBottom: 16 },
+  chip: {
     flexDirection: 'row',
-    backgroundColor: Colors.card,
-    borderRadius: 14,
-    padding: 13,
-    marginBottom: 10,
-    gap: 11,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.04,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  invCardLeft: {
     alignItems: 'center',
-    gap: 5,
-    paddingTop: 2,
-  },
-  invEmojiBadge: {
-    width: 46,
-    height: 46,
-    borderRadius: 13,
-    backgroundColor: Colors.primaryGreen + '0d',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  invEmoji: { fontSize: 22 },
-  stockDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-  },
-  invCardBody: { flex: 1 },
-  invCardTop: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
     gap: 6,
-    marginBottom: 8,
+    paddingHorizontal: 16,
+    height: 36,
+    borderRadius: 999,
+    backgroundColor: Colors.surfaceVariant + '99',
   },
-  invTitle: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: Colors.textDark,
-  },
-  invCategory: {
-    fontSize: 10,
-    fontWeight: '600',
-    color: Colors.primary,
-    marginTop: 2,
-  },
-  invDeleteBtn: {
-    width: 28,
-    height: 28,
-    borderRadius: 8,
-    backgroundColor: Colors.surface,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
+  chipActive: { backgroundColor: Colors.primary },
+  chipText: { fontSize: 14, fontWeight: '500', color: Colors.onSurfaceVariant },
+  chipTextActive: { color: Colors.onPrimary },
+  chipCount: { fontSize: 12, fontWeight: '700', color: Colors.outline },
 
-  stockBarTrack: {
-    height: 4,
-    backgroundColor: Colors.outlineVariant + '50',
-    borderRadius: 2,
-    marginBottom: 8,
-    overflow: 'hidden',
-  },
-  stockBarFill: {
-    height: '100%',
-    borderRadius: 2,
-  },
-
-  invMetrics: {
-    flexDirection: 'row',
-    gap: 6,
-    marginBottom: 8,
-  },
-  invMetric: {
-    flex: 1,
-    gap: 1,
-    backgroundColor: Colors.background,
-    borderRadius: 8,
-    paddingVertical: 5,
-    paddingHorizontal: 6,
-  },
-  invMetricLabel: {
-    fontSize: 8,
-    color: Colors.textLight,
-    fontWeight: '600',
-    textTransform: 'uppercase',
-    letterSpacing: 0.3,
-  },
-  invMetricValue: {
-    fontSize: 13,
-    fontWeight: '800',
-    color: Colors.textDark,
-  },
-  invMetricUnit: {
-    fontSize: 9,
-    color: Colors.textMuted,
-    fontWeight: '600',
-  },
-
-  invActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 6,
-  },
-  qtyControls: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-  },
-  qtyBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    width: 30,
-    height: 26,
-    borderRadius: 7,
-    backgroundColor: Colors.surface,
-    borderWidth: 1,
-    borderColor: Colors.outlineVariant + '60',
-  },
-  qtyValue: {
-    fontSize: 14,
-    fontWeight: '800',
-    color: Colors.textDark,
-    minWidth: 24,
-    textAlign: 'center',
-  },
-  restockBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    backgroundColor: Colors.primary + '0d',
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 8,
-  },
-  restockBtnLabel: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: Colors.primary,
-  },
-
-  invDate: {
-    fontSize: 9,
-    color: Colors.textMuted,
-  },
-
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.35)',
-    justifyContent: 'flex-end',
-  },
-  modalContent: {
+  card: {
     backgroundColor: Colors.card,
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    padding: 20,
-    paddingBottom: 36,
+    borderRadius: 8,
+    borderLeftWidth: 4,
+    padding: 16,
+    marginBottom: 12,
+    ...shadow,
   },
-  modalHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 18,
-  },
-  modalTitle: {
-    fontSize: 17,
-    fontWeight: '800',
-    color: Colors.textDark,
-  },
-  inputLabel: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: Colors.textMedium,
-    marginBottom: 5,
-    textTransform: 'uppercase',
-    letterSpacing: 0.3,
-  },
-  input: {
-    backgroundColor: Colors.background,
-    borderRadius: 10,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    fontSize: 14,
-    fontWeight: '600',
-    color: Colors.textDark,
-    borderWidth: 1,
-    borderColor: Colors.outlineVariant,
-  },
-  dropdownBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: Colors.background,
-    borderRadius: 10,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    borderWidth: 1,
-    borderColor: Colors.outlineVariant,
-  },
-  dropdownText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: Colors.textDark,
-    flex: 1,
-  },
-  dropdownOverlay: {
-    position: 'absolute',
-    backgroundColor: Colors.card,
-    borderRadius: 12,
-    paddingVertical: 4,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.12,
-    shadowRadius: 12,
-    elevation: 8,
-    borderWidth: 1,
-    borderColor: Colors.outlineVariant,
-  },
-  dropdownItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 14,
-    paddingVertical: 11,
-  },
-  dropdownItemActive: {
-    backgroundColor: Colors.primaryGreen + '0d',
-  },
-  dropdownItemText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: Colors.textDark,
-  },
-  dropdownItemTextActive: {
-    color: Colors.primaryGreen,
-    fontWeight: '700',
-  },
-  dropdownEmpty: {
-    padding: 14,
-    fontSize: 12,
-    color: Colors.textMuted,
-    textAlign: 'center',
-  },
-  selectedPreview: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    backgroundColor: Colors.primaryGreen + '0a',
-    borderRadius: 10,
-    padding: 12,
-    marginTop: 10,
-  },
-  selectedPreviewEmoji: { fontSize: 26 },
-  selectedPreviewName: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: Colors.textDark,
-  },
-  selectedPreviewDetail: {
-    fontSize: 10,
-    color: Colors.textLight,
-    marginTop: 1,
-  },
-  modalSubmit: {
-    flexDirection: 'row',
+  cardMuted: { backgroundColor: Colors.surface },
+  cardRow: { flexDirection: 'row', gap: 12 },
+  emojiTile: {
+    width: 56,
+    height: 56,
+    borderRadius: 8,
+    backgroundColor: Colors.surfaceVariant + '66',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 7,
-    backgroundColor: Colors.primaryGreen,
-    paddingVertical: 14,
-    borderRadius: 12,
-    marginTop: 20,
   },
-  modalSubmitText: {
-    fontSize: 14,
-    fontWeight: '800',
-    color: '#fff',
-  },
+  emoji: { fontSize: 28 },
+  cardBody: { flex: 1 },
+  cardTopRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
+  cardTitle: { flex: 1, fontSize: 16, fontWeight: '600', color: Colors.onSurface, lineHeight: 22 },
+  cardPrice: { fontSize: 18, fontWeight: '700', color: Colors.onSurface, marginTop: 4 },
+  cardPerUnit: { fontSize: 13, fontWeight: '400', color: Colors.outline },
+  subRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 6 },
+  subText: { fontSize: 13, color: Colors.outline },
 
-  fab: {
-    position: 'absolute',
-    left: 20,
-    right: 20,
+  pill: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999 },
+  pillDot: { width: 6, height: 6, borderRadius: 3 },
+  pillText: { fontSize: 12, fontWeight: '600' },
+
+  metaRow: { flexDirection: 'row', gap: 16, marginTop: 12 },
+  metaItem: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  metaText: { fontSize: 13, color: Colors.onSurfaceVariant },
+  cardFooter: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    backgroundColor: Colors.primaryGreen,
-    paddingVertical: 14,
-    borderRadius: 14,
-    shadowColor: Colors.primaryGreen,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 6,
-  },
-  fabLabel: {
-    fontSize: 14,
-    fontWeight: '800',
-    color: '#fff',
-  },
-
-  empty: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingTop: 60,
-    gap: 8,
-  },
-  emptyIconWrap: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
-    backgroundColor: Colors.surface,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 4,
-  },
-  emptyTitle: { fontSize: 16, fontWeight: '700', color: Colors.textDark },
-  emptySub: { fontSize: 13, color: Colors.textLight, textAlign: 'center', paddingHorizontal: 40 },
-  clearFilterBtn: {
+    justifyContent: 'space-between',
     marginTop: 12,
-    paddingHorizontal: 20,
-    paddingVertical: 8,
-    borderRadius: 99,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: Colors.divider,
+  },
+  cardDate: { fontSize: 12, color: Colors.outline },
+  footerActions: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  textBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, height: 36, paddingHorizontal: 12, borderRadius: 999, backgroundColor: Colors.greenTint + '99' },
+  textBtnLabel: { fontSize: 13, fontWeight: '600', color: Colors.primary },
+  iconBtn: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
+
+  metrics: { flexDirection: 'row', gap: 8, marginTop: 12 },
+  metric: { flex: 1, backgroundColor: Colors.background, borderRadius: 8, paddingVertical: 8, paddingHorizontal: 10 },
+  metricLabel: { fontSize: 11, fontWeight: '600', color: Colors.outline, textTransform: 'uppercase', letterSpacing: 0.4 },
+  metricValue: { fontSize: 15, fontWeight: '700', color: Colors.onSurface, marginTop: 2 },
+  metricUnit: { fontSize: 12, fontWeight: '400', color: Colors.outline },
+
+  barTrack: { height: 6, borderRadius: 3, backgroundColor: Colors.surfaceVariant, marginTop: 12, overflow: 'hidden' },
+  barFill: { height: '100%', borderRadius: 3 },
+  barCaption: { fontSize: 12, color: Colors.outline, marginTop: 6 },
+
+  invActions: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 12 },
+  stepper: { flexDirection: 'row', alignItems: 'center', borderRadius: 999, borderWidth: 1, borderColor: Colors.outlineVariant },
+  stepBtn: { width: 40, height: 36, alignItems: 'center', justifyContent: 'center' },
+  stepValue: { minWidth: 36, textAlign: 'center', fontSize: 16, fontWeight: '700', color: Colors.onSurface },
+  restockBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, height: 36, paddingHorizontal: 16, borderRadius: 999, backgroundColor: Colors.primary },
+  restockText: { fontSize: 14, fontWeight: '600', color: Colors.onPrimary },
+
+  footer: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    backgroundColor: Colors.card,
+    borderTopWidth: 1,
+    borderTopColor: Colors.divider,
+  },
+  cta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    height: 52,
+    borderRadius: 999,
+    backgroundColor: Colors.secondary,
+  },
+  ctaDisabled: { opacity: 0.5 },
+  ctaText: { fontSize: 16, fontWeight: '600', color: Colors.onSecondary },
+
+  empty: { alignItems: 'center', paddingTop: 48, gap: 8 },
+  emptyIcon: { width: 72, height: 72, borderRadius: 36, backgroundColor: Colors.surfaceVariant + '66', alignItems: 'center', justifyContent: 'center', marginBottom: 8 },
+  emptyTitle: { fontSize: 18, fontWeight: '600', color: Colors.onSurface },
+  emptySub: { fontSize: 14, color: Colors.outline, textAlign: 'center', paddingHorizontal: 40 },
+  clearBtn: { marginTop: 8, paddingHorizontal: 20, height: 40, justifyContent: 'center', borderRadius: 999, borderWidth: 1, borderColor: Colors.outlineVariant },
+  clearText: { fontSize: 14, fontWeight: '600', color: Colors.primary },
+
+  sheetOverlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.4)' },
+  sheet: { backgroundColor: Colors.card, borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingHorizontal: 16, paddingTop: 8, maxHeight: '90%' },
+  sheetHandle: { alignSelf: 'center', width: 40, height: 4, borderRadius: 2, backgroundColor: Colors.outlineVariant, marginBottom: 8 },
+  sheetHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 },
+  sheetTitle: { fontSize: 20, fontWeight: '600', color: Colors.onSurface },
+  sheetScroll: { flexGrow: 0 },
+  sheetCta: { marginTop: 24 },
+
+  label: { fontSize: 14, fontWeight: '600', color: Colors.onSurface, marginBottom: 8 },
+  labelGap: { marginTop: 8 },
+  fieldRow: { flexDirection: 'row', gap: 12 },
+  field: { flex: 1 },
+  input: {
+    height: 48,
+    paddingHorizontal: 12,
+    borderRadius: 8,
     borderWidth: 1,
     borderColor: Colors.outlineVariant,
+    fontSize: 16,
+    color: Colors.onSurface,
   },
-  clearFilterText: { fontSize: 12, fontWeight: '600', color: Colors.textMedium },
+  bigInput: { height: 64, fontSize: 28, fontWeight: '700', textAlign: 'center' },
+  currencyInput: { flexDirection: 'row', alignItems: 'center', height: 48, paddingHorizontal: 12, borderRadius: 8, borderWidth: 1, borderColor: Colors.outlineVariant },
+  currencySymbol: { fontSize: 18, fontWeight: '700', color: Colors.onSurface, marginRight: 4 },
+  currencyField: { flex: 1, fontSize: 18, fontWeight: '700', color: Colors.onSurface, paddingVertical: 0 },
+  hint: { fontSize: 13, color: Colors.primary, fontWeight: '500', marginTop: 8 },
+
+  productRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    padding: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: Colors.divider,
+    marginBottom: 8,
+  },
+  productRowActive: { borderColor: Colors.primary, backgroundColor: Colors.greenTint + '4d' },
+  productEmoji: { fontSize: 26 },
+  productName: { fontSize: 15, fontWeight: '600', color: Colors.onSurface },
+  productPrice: { fontSize: 13, color: Colors.outline, marginTop: 2 },
+
+  restockItem: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 12, borderRadius: 8, backgroundColor: Colors.background, marginBottom: 16 },
+  quickRow: { flexDirection: 'row', gap: 8, marginTop: 12 },
 });
