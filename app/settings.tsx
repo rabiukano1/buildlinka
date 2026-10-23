@@ -1,6 +1,9 @@
 import { useState, useRef } from 'react';
 import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Switch, Alert, Modal, Animated } from 'react-native';
 import { Stack, useRouter, useLocalSearchParams } from 'expo-router';
+import { useAuthActions } from '@convex-dev/auth/react';
+import { useQuery } from 'convex/react';
+import { api } from '../convex/_generated/api';
 import { MaterialIcons } from '@expo/vector-icons';
 import Constants from 'expo-constants';
 import { Colors } from '../constants/Colors';
@@ -9,7 +12,6 @@ import { useNotifications } from '../contexts/NotificationContext';
 // ponytail: client-side PIN is only a hidden-door, real admin auth belongs on the backend
 const ADMIN_PIN = '1234';
 const APP_VERSION = Constants.expoConfig?.version ?? '1.0.0';
-const PROFILE = { name: 'John Doe', email: 'john.doe@example.com' };
 
 type RowProps = {
   icon: string;
@@ -75,9 +77,11 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 
 export default function SettingsScreen() {
   const router = useRouter();
+  const { signOut } = useAuthActions();
   const { role } = useLocalSearchParams<{ role?: string }>();
   const isVendor = role === 'vendor';
   const { unreadCount } = useNotifications();
+  const me = useQuery(api.users.me);
   const [hideProfile, setHideProfile] = useState(false);
   const [acceptingOrders, setAcceptingOrders] = useState(true);
   const [stockAlerts, setStockAlerts] = useState(true);
@@ -88,7 +92,7 @@ export default function SettingsScreen() {
   const tapCount = useRef(0);
   const lastTap = useRef(0);
 
-  const initials = PROFILE.name.split(' ').map((p) => p[0]).join('').slice(0, 2).toUpperCase();
+  const initials = (me?.name || '?').split(' ').map((p) => p[0]).join('').slice(0, 2).toUpperCase();
 
   const handleVersionTap = () => {
     const now = Date.now();
@@ -133,7 +137,13 @@ export default function SettingsScreen() {
   const handleLogout = () =>
     Alert.alert('Log out', 'You will need to sign in again to manage your account.', [
       { text: 'Cancel', style: 'cancel' },
-      { text: 'Log out', style: 'destructive', onPress: () => router.replace('/') },
+      {
+        text: 'Log out',
+        style: 'destructive',
+        onPress: () => {
+          signOut().catch(() => {}).finally(() => router.replace('/sign-in'));
+        },
+      },
     ]);
 
   return (
@@ -145,8 +155,8 @@ export default function SettingsScreen() {
             <Text style={styles.avatarText}>{initials}</Text>
           </View>
           <View style={styles.rowBody}>
-            <Text style={styles.profileName}>{PROFILE.name}</Text>
-            <Text style={styles.profileEmail} numberOfLines={1}>{PROFILE.email}</Text>
+            <Text style={styles.profileName}>{me?.name || 'Your profile'}</Text>
+            <Text style={styles.profileEmail} numberOfLines={1}>{me?.phone || me?.email || ''}</Text>
             {isVendor && (
               <View style={styles.roleChip}>
                 <MaterialIcons name="storefront" size={12} color={Colors.primary} />

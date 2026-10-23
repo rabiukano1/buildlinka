@@ -1,57 +1,49 @@
-import { createContext, useContext, useReducer, type ReactNode } from 'react';
-import type { Product } from '../constants/MockData';
-
-type SavedState = {
-  items: Product[];
-};
-
-type SavedAction =
-  | { type: 'TOGGLE_SAVE'; product: Product }
-  | { type: 'CLEAR' };
+import { createContext, useContext, useMemo, type ReactNode } from 'react';
+import { useMutation, useQuery } from 'convex/react';
+import { useConvexAuth } from '@convex-dev/auth/react';
+import { api } from '../convex/_generated/api';
+import type { Id } from '../convex/_generated/dataModel';
+import type { BackendProduct } from '../lib/backend';
 
 type SavedContextType = {
-  items: Product[];
+  items: BackendProduct[];
   savedIds: Set<string>;
   isSaved: (productId: string) => boolean;
-  toggleSave: (product: Product) => void;
+  toggleSave: (product: BackendProduct) => void;
   clearSaved: () => void;
+  loading: boolean;
 };
 
 const SavedContext = createContext<SavedContextType | null>(null);
 
-function savedReducer(state: SavedState, action: SavedAction): SavedState {
-  switch (action.type) {
-    case 'TOGGLE_SAVE': {
-      const exists = state.items.find((p) => p.id === action.product.id);
-      if (exists) {
-        return { items: state.items.filter((p) => p.id !== action.product.id) };
-      }
-      return { items: [action.product, ...state.items] };
-    }
-    case 'CLEAR':
-      return { items: [] };
-    default:
-      return state;
-  }
-}
-
 export function SavedProvider({ children }: { children: ReactNode }) {
-  const [state, dispatch] = useReducer(savedReducer, { items: [] });
-
-  const savedIds = new Set(state.items.map((p) => p.id));
-
-  const isSaved = (productId: string) => savedIds.has(productId);
-
-  const toggleSave = (product: Product) =>
-    dispatch({ type: 'TOGGLE_SAVE', product });
-
-  const clearSaved = () => dispatch({ type: 'CLEAR' });
-
-  return (
-    <SavedContext.Provider value={{ items: state.items, savedIds, isSaved, toggleSave, clearSaved }}>
-      {children}
-    </SavedContext.Provider>
+  const { isAuthenticated } = useConvexAuth();
+  const ids = useQuery(api.saved.ids, isAuthenticated ? {} : 'skip');
+  const savedIdsList = ids ?? [];
+  const products = useQuery(
+    api.products.byIds,
+    savedIdsList.length ? { ids: savedIdsList as Id<'products'>[] } : 'skip',
   );
+  const toggle = useMutation(api.saved.toggle);
+  const clear = useMutation(api.saved.clear);
+
+  const items = useMemo(() => {
+    const byId = new Map((products ?? []).map((p) => [p._id, p as BackendProduct]));
+    return savedIdsList.map((id) => byId.get(id)).filter((p): p is BackendProduct => !!p);
+  }, [products, savedIdsList]);
+
+  const savedIds = useMemo(() => new Set<string>(savedIdsList as string[]), [savedIdsList]);
+
+  const value: SavedContextType = {
+    items,
+    savedIds,
+    isSaved: (productId) => savedIds.has(productId),
+    toggleSave: (product) => { void toggle({ productId: product._id as unknown as Id<'products'> }); },
+    clearSaved: () => { void clear({}); },
+    loading: isAuthenticated && ids === undefined,
+  };
+
+  return <SavedContext.Provider value={value}>{children}</SavedContext.Provider>;
 }
 
 export function useSaved() {

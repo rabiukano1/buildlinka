@@ -1,42 +1,52 @@
 import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Image } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { Colors } from '../constants/Colors';
-import type { Worker } from '../constants/MockData';
+import { formatPrice } from '../lib/backend';
 
-type Props = {
-  worker: Worker;
-  onPress?: () => void;
+/** Worker profile as returned by convex/workers.ts `list` / `mine`. */
+export type WorkerCardWorker = {
+  name: string;
+  trade: string;
+  rating: number;
+  reviewCount: number;
+  location: string;
+  jobsDone: number;
+  experienceYears: number;
+  hourlyRate: number;
+  available: boolean;
+  verified?: boolean;
+  photoUrl?: string | null;
 };
 
-const formatPrice = (price: number) => '₦' + price.toLocaleString('en-NG');
+type Props = {
+  worker: WorkerCardWorker;
+  onPress?: () => void;
+};
 
 export default function WorkerCard({ worker, onPress }: Props) {
   return (
     <TouchableOpacity style={styles.card} onPress={onPress} activeOpacity={0.8}>
-      {/* Avatar */}
       <View style={[styles.avatar, !worker.available && styles.avatarBusy]}>
-        <Text style={styles.avatarEmoji}>{worker.avatar}</Text>
+        {worker.photoUrl ? (
+          <Image source={{ uri: worker.photoUrl }} style={styles.avatarImg} />
+        ) : (
+          <Text style={styles.avatarText}>{worker.name.charAt(0).toUpperCase()}</Text>
+        )}
         <View style={[styles.dot, worker.available ? styles.dotGreen : styles.dotRed]} />
       </View>
 
-      {/* Info */}
       <View style={styles.info}>
         <View style={styles.nameRow}>
-          <Text style={styles.name}>{worker.name}</Text>
-          {worker.completedJobs > 100 && (
-            <View style={styles.topBadge}>
-              <MaterialIcons name="verified" size={12} color={Colors.amber} />
-              <Text style={styles.topBadgeText}>Top Pro</Text>
-            </View>
-          )}
+          <Text style={styles.name} numberOfLines={1}>{worker.name}</Text>
+          {worker.verified && <MaterialIcons name="verified" size={14} color={Colors.primaryGreen} />}
         </View>
         <Text style={styles.trade}>{worker.trade}</Text>
 
         <View style={styles.metaRow}>
           <View style={styles.metaItem}>
             <MaterialIcons name="star" size={13} color={Colors.amber} />
-            <Text style={styles.metaText}>{worker.rating} ({worker.reviewCount})</Text>
+            <Text style={styles.metaText}>{worker.rating.toFixed(1)} ({worker.reviewCount})</Text>
           </View>
           <View style={styles.metaDot} />
           <View style={styles.metaItem}>
@@ -48,26 +58,22 @@ export default function WorkerCard({ worker, onPress }: Props) {
         <View style={styles.metaRow}>
           <View style={styles.metaItem}>
             <MaterialIcons name="work" size={13} color={Colors.textMuted} />
-            <Text style={styles.metaText}>{worker.completedJobs} jobs</Text>
+            <Text style={styles.metaText}>{worker.jobsDone} jobs</Text>
           </View>
           <View style={styles.metaDot} />
           <View style={styles.metaItem}>
             <MaterialIcons name="history" size={13} color={Colors.textMuted} />
-            <Text style={styles.metaText}>{worker.experience} yrs exp</Text>
+            <Text style={styles.metaText}>{worker.experienceYears} yrs exp</Text>
           </View>
         </View>
       </View>
 
-      {/* Right */}
       <View style={styles.right}>
-        <Text style={styles.rate}>{formatPrice(worker.dailyRate)}</Text>
-        <Text style={styles.rateLabel}>/day</Text>
-        <TouchableOpacity
-          style={[styles.hireBtn, !worker.available && styles.hireBtnDisabled]}
-          disabled={!worker.available}
-        >
+        <Text style={styles.rate}>{formatPrice(worker.hourlyRate)}</Text>
+        <Text style={styles.rateLabel}>/hour</Text>
+        <View style={[styles.hireBtn, !worker.available && styles.hireBtnDisabled]}>
           <Text style={styles.hireText}>{worker.available ? 'Hire' : 'Busy'}</Text>
-        </TouchableOpacity>
+        </View>
       </View>
     </TouchableOpacity>
   );
@@ -99,12 +105,14 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderWidth: 1,
     borderColor: Colors.outlineVariant,
+    overflow: 'hidden',
   },
   avatarBusy: {
     borderColor: Colors.border,
     backgroundColor: Colors.divider,
   },
-  avatarEmoji: { fontSize: 30 },
+  avatarImg: { width: 60, height: 60 },
+  avatarText: { fontSize: 24, fontWeight: '700', color: Colors.primaryGreen },
   dot: {
     position: 'absolute',
     bottom: 2,
@@ -119,17 +127,7 @@ const styles = StyleSheet.create({
   dotRed: { backgroundColor: Colors.error },
   info: { flex: 1, gap: 3 },
   nameRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  name: { fontSize: 15, fontWeight: '700', color: Colors.textDark },
-  topBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: Colors.amberLight,
-    borderRadius: 4,
-    paddingHorizontal: 5,
-    paddingVertical: 2,
-    gap: 2,
-  },
-  topBadgeText: { fontSize: 9.5, fontWeight: '700', color: Colors.secondary },
+  name: { fontSize: 15, fontWeight: '700', color: Colors.textDark, flexShrink: 1 },
   trade: { fontSize: 12.5, color: Colors.primaryGreen, fontWeight: '600' },
   metaRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2 },
   metaItem: { flexDirection: 'row', alignItems: 'center', gap: 3, flex: 1 },
@@ -140,7 +138,7 @@ const styles = StyleSheet.create({
   rateLabel: { fontSize: 10, color: Colors.textLight },
   hireBtn: {
     backgroundColor: Colors.secondary,
-    borderRadius: 99, // Pill shaped as per DESIGN.md
+    borderRadius: 99,
     paddingHorizontal: 16,
     paddingVertical: 8,
     marginTop: 6,

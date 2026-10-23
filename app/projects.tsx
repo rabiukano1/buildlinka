@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, TextInput } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, TextInput, Alert } from 'react-native';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -7,6 +7,7 @@ import KeyboardAwareWrapper from '../components/KeyboardAwareWrapper';
 import Dropdown from '../components/Dropdown';
 import { Colors } from '../constants/Colors';
 import { useEngineer, type ProjectStatus } from '../contexts/EngineerContext';
+import { errorMessage } from '../lib/backend';
 import { PROJECT_STATUS, Field, Pill, PrimaryButton, ProgressBar, Sheet, nairaShort, ui } from '../components/EngineerUI';
 
 const FILTERS: ('all' | ProjectStatus)[] = ['all', 'on-track', 'at-risk', 'delayed', 'completed'];
@@ -31,18 +32,22 @@ export default function ProjectsScreen() {
   const totalSpent = projects.reduce((s, p) => s + p.spent, 0);
   const canCreate = draft.name.trim() && draft.client.trim() && Number(draft.budget) > 0;
 
-  const create = () => {
+  const create = async () => {
     if (!canCreate) return;
-    const id = addProject({
-      name: draft.name.trim(),
-      client: draft.client.trim(),
-      location: draft.location.trim() || 'Not set',
-      budget: Number(draft.budget),
-      deadline: draft.deadline.trim() || 'TBD',
-    });
-    setCreating(false);
-    setDraft({ name: '', client: '', location: '', budget: '', deadline: '' });
-    router.push(`/project/${id}` as any);
+    try {
+      const id = await addProject({
+        name: draft.name.trim(),
+        client: draft.client.trim(),
+        location: draft.location.trim() || 'Not set',
+        budget: Number(draft.budget),
+        deadline: draft.deadline.trim() || 'TBD',
+      });
+      setCreating(false);
+      setDraft({ name: '', client: '', location: '', budget: '', deadline: '' });
+      router.push(`/project/${id}` as any);
+    } catch (err) {
+      Alert.alert('Could not create project', errorMessage(err));
+    }
   };
 
   const footer = (

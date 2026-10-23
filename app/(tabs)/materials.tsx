@@ -1,42 +1,38 @@
 import { useEffect, useMemo, useState } from 'react';
-import { View, Text, FlatList, StyleSheet, TouchableOpacity, TextInput } from 'react-native';
+import { View, Text, FlatList, StyleSheet, TouchableOpacity, TextInput, ActivityIndicator } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { MaterialIcons } from '@expo/vector-icons';
+import { useQuery } from 'convex/react';
+import { api } from '../../convex/_generated/api';
 import { Colors } from '../../constants/Colors';
-import { CATEGORIES, PRODUCTS, type Product } from '../../constants/MockData';
+import { formatPrice, type BackendProduct } from '../../lib/backend';
 import { useCart } from '../../contexts/CartContext';
 import { useSaved } from '../../contexts/SavedItemsContext';
 import ProductCard from '../../components/ProductCard';
+import { Image } from 'expo-image';
 import Dropdown from '../../components/Dropdown';
 
+const CATEGORIES = ['Cement', 'Steel & Iron', 'Roofing', 'Electrical', 'Plumbing', 'Tiles', 'Timber', 'Equipment', 'Glass', 'Paint', 'Blocks'];
+
 const SORTS = [
-  { value: 'popular', label: 'Most popular', icon: 'local-fire-department' },
+  { value: 'newest', label: 'Newest first', icon: 'schedule' },
   { value: 'price-asc', label: 'Price: low to high', icon: 'south' },
   { value: 'price-desc', label: 'Price: high to low', icon: 'north' },
-  { value: 'rating', label: 'Top rated', icon: 'star' },
 ];
 
-const SORTERS: Record<string, (a: Product, b: Product) => number> = {
-  popular: (a, b) => b.reviewCount - a.reviewCount,
+const SORTERS: Record<string, (a: BackendProduct, b: BackendProduct) => number> = {
+  newest: (a, b) => b.createdAt - a.createdAt,
   'price-asc': (a, b) => a.price - b.price,
   'price-desc': (a, b) => b.price - a.price,
-  rating: (a, b) => b.rating - a.rating,
 };
 
 const CATEGORY_OPTIONS = [
-  { value: 'All', label: 'All categories', icon: 'apps', count: PRODUCTS.length },
-  ...CATEGORIES.filter((c) => c.name !== 'More').map((c) => ({
-    value: c.name,
-    label: c.name,
-    icon: c.icon,
-    count: PRODUCTS.filter((p) => p.category === c.name).length,
-  })),
+  { value: 'All', label: 'All categories', icon: 'apps' },
+  ...CATEGORIES.map((name) => ({ value: name, label: name, icon: 'category' })),
 ];
 
-const formatPrice = (price: number) => '₦' + price.toLocaleString('en-NG');
-
 function GridCard({ product, quantity, onPress, onAdd, onChangeQty, onToggleSave, saved }: {
-  product: Product;
+  product: BackendProduct;
   quantity: number;
   onPress: () => void;
   onAdd: () => void;
@@ -44,19 +40,17 @@ function GridCard({ product, quantity, onPress, onAdd, onChangeQty, onToggleSave
   onToggleSave: () => void;
   saved: boolean;
 }) {
+  const out = product.stock <= 0;
   return (
     <TouchableOpacity style={styles.card} onPress={onPress} activeOpacity={0.85}>
       <View style={styles.imageBox}>
-        <Text style={styles.emoji}>{product.imageEmoji}</Text>
-        {product.badge && (
-          <View style={[styles.badge, product.badge === 'Best Seller' && styles.badgeOrange]}>
-            <Text style={styles.badgeText}>{product.badge}</Text>
-          </View>
-        )}
+        {product.photoUrls[0]
+          ? <Image source={{ uri: product.photoUrls[0] }} style={{ width: 72, height: 72, borderRadius: 8 }} contentFit="cover" />
+          : <Text style={styles.emoji}>📦</Text>}
         <TouchableOpacity style={styles.saveBtn} onPress={onToggleSave} hitSlop={8} accessibilityLabel={saved ? 'Remove from saved' : 'Save'}>
           <MaterialIcons name={saved ? 'bookmark' : 'bookmark-border'} size={18} color={saved ? Colors.secondary : Colors.onSurfaceVariant} />
         </TouchableOpacity>
-        {!product.inStock && (
+        {out && (
           <View style={styles.soldOut}>
             <Text style={styles.soldOutText}>Out of stock</Text>
           </View>
@@ -65,11 +59,9 @@ function GridCard({ product, quantity, onPress, onAdd, onChangeQty, onToggleSave
 
       <View style={styles.info}>
         <Text style={styles.name} numberOfLines={2}>{product.name}</Text>
-        <Text style={styles.vendor} numberOfLines={1}>{product.vendor}</Text>
-        <View style={styles.ratingRow}>
-          <MaterialIcons name="star" size={14} color="#f5a623" />
-          <Text style={styles.rating}>{product.rating}</Text>
-          <Text style={styles.reviews}>({product.reviewCount})</Text>
+        <View style={styles.vendorRow}>
+          <Text style={styles.vendor} numberOfLines={1}>{product.storeName}</Text>
+          {product.storeVerified && <MaterialIcons name="verified" size={12} color={Colors.primary} />}
         </View>
         <Text style={styles.price}>
           {formatPrice(product.price)}<Text style={styles.unit}> /{product.unit}</Text>
@@ -87,13 +79,13 @@ function GridCard({ product, quantity, onPress, onAdd, onChangeQty, onToggleSave
           </View>
         ) : (
           <TouchableOpacity
-            style={[styles.addBtn, !product.inStock && styles.addBtnDisabled]}
+            style={[styles.addBtn, out && styles.addBtnDisabled]}
             onPress={onAdd}
-            disabled={!product.inStock}
+            disabled={out}
             activeOpacity={0.8}
           >
             <MaterialIcons name="add-shopping-cart" size={16} color={Colors.onSecondary} />
-            <Text style={styles.addText}>Add</Text>
+            <Text style={styles.addText}>{out ? 'Out of stock' : 'Add'}</Text>
           </TouchableOpacity>
         )}
       </View>
@@ -112,23 +104,25 @@ export default function MaterialsScreen() {
     if (params.q) setSearch(params.q);
   }, [params.q]);
   const [category, setCategory] = useState('All');
-  const [sort, setSort] = useState('popular');
+  const [sort, setSort] = useState('newest');
   const [inStockOnly, setInStockOnly] = useState(false);
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
 
-  const q = search.trim().toLowerCase();
+  const q = search.trim();
+  // Server filters by category + search; stock toggle + sort stay client-side.
+  const rows = useQuery(
+    api.products.list,
+    { category: category === 'All' ? undefined : category, search: q || undefined }
+  );
   const products = useMemo(
-    () => PRODUCTS
-      .filter((p) =>
-        (category === 'All' || p.category === category)
-        && (!inStockOnly || p.inStock)
-        && (!q || `${p.name} ${p.vendor} ${p.category}`.toLowerCase().includes(q)))
+    () => (rows ?? [])
+      .filter((p) => !inStockOnly || p.stock > 0)
       .sort(SORTERS[sort]),
-    [category, inStockOnly, q, sort]
+    [rows, inStockOnly, sort]
   );
 
-  const qtyOf = (id: string) => items.find((i) => i.product.id === id)?.quantity ?? 0;
-  const changeQty = (p: Product, qty: number) => (qty <= 0 ? removeItem(p.id) : updateQuantity(p.id, qty));
+  const qtyOf = (id: string) => items.find((i) => i.product._id === id)?.quantity ?? 0;
+  const changeQty = (p: BackendProduct, qty: number) => (qty <= 0 ? removeItem(p._id) : updateQuantity(p._id, qty));
   const hasFilters = category !== 'All' || inStockOnly || q.length > 0;
   const clearFilters = () => {
     setCategory('All');
@@ -189,7 +183,7 @@ export default function MaterialsScreen() {
       <FlatList
         key={viewMode}
         data={products}
-        keyExtractor={(item) => item.id}
+        keyExtractor={(item) => item._id}
         numColumns={viewMode === 'grid' ? 2 : 1}
         columnWrapperStyle={viewMode === 'grid' ? styles.gridRow : undefined}
         contentContainerStyle={styles.list}
@@ -201,38 +195,47 @@ export default function MaterialsScreen() {
             <View style={styles.cell}>
               <GridCard
                 product={item}
-                quantity={qtyOf(item.id)}
-                onPress={() => router.push(`/product/${item.id}`)}
+                quantity={qtyOf(item._id)}
+                onPress={() => router.push(`/product/${item._id}`)}
                 onAdd={() => addItem(item)}
                 onChangeQty={(qty) => changeQty(item, qty)}
                 onToggleSave={() => toggleSave(item)}
-                saved={isSaved(item.id)}
+                saved={isSaved(item._id)}
               />
             </View>
           ) : (
             <ProductCard
               product={item}
               horizontal
-              onPress={() => router.push(`/product/${item.id}`)}
+              onPress={() => router.push(`/product/${item._id}`)}
               onAddToCart={() => addItem(item)}
               onToggleSave={() => toggleSave(item)}
-              isSaved={isSaved(item.id)}
+              isSaved={isSaved(item._id)}
             />
           )
         }
         ListEmptyComponent={
+          rows === undefined ? (
+            <View style={styles.empty}>
+              <ActivityIndicator size="large" color={Colors.primary} />
+              <Text style={styles.emptySub}>Loading materials…</Text>
+            </View>
+          ) : (
           <View style={styles.empty}>
             <View style={styles.emptyIcon}>
               <MaterialIcons name="search-off" size={32} color={Colors.outline} />
             </View>
             <Text style={styles.emptyTitle}>No materials found</Text>
-            <Text style={styles.emptySub}>Try another category or search term.</Text>
+            <Text style={styles.emptySub}>
+              {hasFilters ? 'Try another category or search term.' : 'No products listed yet. Vendors can add the first listing.'}
+            </Text>
             {hasFilters && (
               <TouchableOpacity style={styles.emptyBtn} onPress={clearFilters}>
                 <Text style={styles.clearText}>Clear filters</Text>
               </TouchableOpacity>
             )}
           </View>
+          )
         }
       />
     </View>
@@ -294,7 +297,8 @@ const styles = StyleSheet.create({
 
   info: { padding: 12, gap: 4 },
   name: { fontSize: 14, fontWeight: '600', color: Colors.onSurface, lineHeight: 19, minHeight: 38 },
-  vendor: { fontSize: 12, color: Colors.outline },
+  vendorRow: { flexDirection: 'row', alignItems: 'center', gap: 3 },
+  vendor: { fontSize: 12, color: Colors.outline, flexShrink: 1 },
   ratingRow: { flexDirection: 'row', alignItems: 'center', gap: 3 },
   rating: { fontSize: 12, fontWeight: '700', color: Colors.onSurface },
   reviews: { fontSize: 12, color: Colors.outline },

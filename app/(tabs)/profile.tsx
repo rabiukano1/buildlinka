@@ -8,8 +8,13 @@ import {
   RefreshControl,
   Animated,
   ActivityIndicator,
+  Alert,
 } from 'react-native';
 import { useRouter } from 'expo-router';
+import { useAuthActions } from '@convex-dev/auth/react';
+import { useMutation, useQuery } from 'convex/react';
+import { api } from '../../convex/_generated/api';
+import { ROLE_HOME, type Role } from '../../lib/backend';
 import { MaterialIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Image } from 'expo-image';
@@ -49,11 +54,7 @@ const MENU_SECTIONS: { title: string; items: MenuItem[] }[] = [
   },
 ];
 
-const RECENT_ACTIVITY = [
-  { icon: 'shopping-cart', label: 'Ordered Dangote Cement 42.5R', time: '2 hours ago', color: Colors.primaryGreen },
-  { icon: 'handyman', label: 'Hired Emeka Okafor (Mason)', time: '1 day ago', color: Colors.primaryOrange },
-  { icon: 'star', label: 'Reviewed TileWorld Nigeria', time: '3 days ago', color: Colors.amber },
-];
+const RECENT_ACTIVITY: { icon: string; label: string; time: string; color: string }[] = [];
 
 function FadeInSection({ children, delay = 0 }: { children: React.ReactNode; delay?: number }) {
   const opacity = useRef(new Animated.Value(0)).current;
@@ -78,6 +79,43 @@ function FadeInSection({ children, delay = 0 }: { children: React.ReactNode; del
 
 export default function ProfileScreen() {
   const router = useRouter();
+  const { signOut } = useAuthActions();
+  const me = useQuery(api.users.me);
+  const myOrders = useQuery(api.orders.mine, me ? {} : 'skip');
+  const recentOrders = (myOrders ?? []).slice(0, 3);
+  const setRole = useMutation(api.users.setRole);
+  const [switching, setSwitching] = useState(false);
+
+  const ROLE_META: { role: Role; label: string; icon: string }[] = [
+    { role: 'buyer', label: 'Buyer', icon: 'shopping-bag' },
+    { role: 'vendor', label: 'Vendor', icon: 'storefront' },
+    { role: 'worker', label: 'Worker', icon: 'build' },
+    { role: 'engineer', label: 'Engineer', icon: 'engineering' },
+    ...(me?.roles.includes('admin') ? [{ role: 'admin' as Role, label: 'Admin', icon: 'shield' }] : []),
+  ];
+
+  const switchRole = async (role: Role) => {
+    if (role === me?.activeRole || switching) return;
+    // Admins open the panel directly; the admin role itself is granted, never picked.
+    if (role === 'admin') {
+      router.replace('/admin-panel' as any);
+      return;
+    }
+    // Vendors need a store before the vendor dashboard makes sense.
+    if (role === 'vendor' && !me?.store) {
+      router.push('/create-store' as any);
+      return;
+    }
+    setSwitching(true);
+    try {
+      await setRole({ role });
+      router.replace((ROLE_HOME[role] ?? '/(tabs)') as any);
+    } catch {
+      Alert.alert('Could not switch role', 'Please try again.');
+    } finally {
+      setSwitching(false);
+    }
+  };
   const [refreshing, setRefreshing] = useState(false);
   const [avatarUri, setAvatarUri] = useState<string | null>(null);
   const { pickAvatar } = useMediaPicker();
@@ -130,8 +168,8 @@ export default function ProfileScreen() {
                 <MaterialIcons name="verified" size={18} color={Colors.amber} />
               </View>
             </View>
-            <Text style={styles.profileName}>Chidi Okonkwo</Text>
-            <Text style={styles.profileEmail}>chidi.okonkwo@example.com</Text>
+            <Text style={styles.profileName}>{me?.name || 'Your profile'}</Text>
+            <Text style={styles.profileEmail}>{me?.phone || me?.email || 'Sign in to see your details'}</Text>
             <View style={styles.profileMeta}>
               <MaterialIcons name="location-on" size={13} color="rgba(255,255,255,0.6)" />
               <Text style={styles.profileLocation}>
@@ -145,10 +183,10 @@ export default function ProfileScreen() {
       <FadeInSection delay={80}>
         <View style={styles.statsCard}>
           {[
-            { number: '12', label: 'Orders', color: Colors.primaryGreen },
-            { number: '4', label: 'Listings', color: Colors.primaryOrange },
-            { number: '8', label: 'Reviews', color: Colors.amber },
-            { number: '4.9', label: 'Rating', color: Colors.primaryGreen },
+            { number: String(me?.roles.length ?? 0), label: 'Roles', color: Colors.primaryGreen },
+            { number: me?.store ? '1' : '0', label: 'Stores', color: Colors.primaryOrange },
+            { number: me?.activeRole ? me.activeRole[0].toUpperCase() + me.activeRole.slice(1) : '—', label: 'Role', color: Colors.amber },
+            { number: me ? String(new Date(me.joinedAt).getFullYear()) : '—', label: 'Since', color: Colors.primaryGreen },
           ].map((stat, i) => (
             <TouchableOpacity
               key={stat.label}
@@ -183,15 +221,48 @@ export default function ProfileScreen() {
         </LinearGradient>
       </FadeInSection>
 
-      {/* ─── Recent Activity ─── */}
+      {/* ─── Recent Activity — real orders, newest first ─── */}
       <FadeInSection delay={240}>
         <View style={styles.sectionBlock}>
           <Text style={styles.sectionTitle}>Recent Activity</Text>
           <View style={styles.activityCard}>
+            {myOrders === undefined ? (
+              <View style={styles.activityRow}>
+                <ActivityIndicator size="small" color={Colors.primaryGreen} />
+              </View>
+            ) : recentOrders.length === 0 ? (
+              <View style={styles.activityRow}>
+                <View style={[styles.activityIconBox, { backgroundColor: Colors.primaryGreen + '18' }]}>
+                  <MaterialIcons name="shopping-bag" size={18} color={Colors.primaryGreen} />
+                </View>
+                <View style={styles.activityInfo}>
+                  <Text style={styles.activityLabel} numberOfLines={1}>No orders yet</Text>
+                  <Text style={styles.activityTime}>Your orders will appear here</Text>
+                </View>
+              </View>
+            ) : (
+              recentOrders.map((o, i) => (
+                <View
+                  key={o._id}
+                  style={[styles.activityRow, i < recentOrders.length - 1 && styles.activityRowBorder]}
+                >
+                  <View style={[styles.activityIconBox, { backgroundColor: Colors.primaryGreen + '18' }]}>
+                    <MaterialIcons name="shopping-cart" size={18} color={Colors.primaryGreen} />
+                  </View>
+                  <View style={styles.activityInfo}>
+                    <Text style={styles.activityLabel} numberOfLines={1}>
+                      Order {o.number} · {o.status}
+                    </Text>
+                    <Text style={styles.activityTime}>{o.storeName}</Text>
+                  </View>
+                  <MaterialIcons name="chevron-right" size={18} color={Colors.border} />
+                </View>
+              ))
+            )}
             {RECENT_ACTIVITY.map((a, i) => (
               <View
-                key={i}
-                style={[styles.activityRow, i < RECENT_ACTIVITY.length - 1 && styles.activityRowBorder]}
+                key={'legacy-' + i}
+                style={[styles.activityRow, styles.activityRowBorder]}
               >
                 <View style={[styles.activityIconBox, { backgroundColor: a.color + '18' }]}>
                   <MaterialIcons name={a.icon as any} size={18} color={a.color} />
@@ -204,6 +275,48 @@ export default function ProfileScreen() {
               </View>
             ))}
           </View>
+        </View>
+      </FadeInSection>
+
+      {/* ─── My roles — switch type or add a new one ─── */}
+      <FadeInSection delay={280}>
+        <View style={styles.sectionBlock}>
+          <Text style={styles.sectionTitle}>My roles</Text>
+          <Text style={styles.roleHint}>
+            {me
+              ? `Using BuildLinka as ${me.activeRole ? me.activeRole[0].toUpperCase() + me.activeRole.slice(1) : 'a new member'}. One account, every type — switch any time.`
+              : 'Sign in to see your roles.'}
+          </Text>
+          <View style={styles.roleGrid}>
+            {ROLE_META.filter((r) => r.role === me?.activeRole || me?.roles.includes(r.role)).map((r) => {
+              const active = r.role === me?.activeRole;
+              return (
+                <TouchableOpacity
+                  key={r.role}
+                  style={[styles.roleChip, active && styles.roleChipActive]}
+                  onPress={() => switchRole(r.role)}
+                  disabled={active || switching}
+                  activeOpacity={0.7}
+                >
+                  <MaterialIcons
+                    name={r.icon as never}
+                    size={18}
+                    color={active ? Colors.textWhite : Colors.primaryGreen}
+                  />
+                  <Text style={[styles.roleChipText, active && styles.roleChipTextActive]}>{r.label}</Text>
+                  {active && <MaterialIcons name="check-circle" size={14} color={Colors.textWhite} />}
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+          <TouchableOpacity
+            style={styles.addRoleBtn}
+            onPress={() => router.push('/persona-onboarding' as any)}
+            activeOpacity={0.7}
+          >
+            <MaterialIcons name="add-circle-outline" size={18} color={Colors.primaryGreen} />
+            <Text style={styles.addRoleText}>Add another role</Text>
+          </TouchableOpacity>
         </View>
       </FadeInSection>
 
@@ -257,7 +370,21 @@ export default function ProfileScreen() {
 
       {/* ─── Logout ─── */}
       <FadeInSection delay={600}>
-        <TouchableOpacity style={styles.logoutBtn}>
+        <TouchableOpacity
+          style={styles.logoutBtn}
+          onPress={() =>
+            Alert.alert('Log out', 'You will need to sign in again.', [
+              { text: 'Cancel', style: 'cancel' },
+              {
+                text: 'Log out',
+                style: 'destructive',
+                onPress: () => {
+                  signOut().catch(() => {}).finally(() => router.replace('/sign-in'));
+                },
+              },
+            ])
+          }
+        >
           <MaterialIcons name="logout" size={20} color={Colors.error} />
           <Text style={styles.logoutText}>Log Out</Text>
         </TouchableOpacity>
@@ -493,6 +620,56 @@ const styles = StyleSheet.create({
   activityTime: {
     fontSize: 11,
     color: Colors.textMuted,
+  },
+
+  /* ─── Roles ─── */
+  roleHint: {
+    fontSize: 13,
+    color: Colors.textMuted,
+    marginBottom: 10,
+    paddingLeft: 4,
+    lineHeight: 18,
+  },
+  roleGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  roleChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 99,
+    borderWidth: 1.5,
+    borderColor: Colors.outlineVariant,
+    backgroundColor: Colors.card,
+  },
+  roleChipActive: {
+    borderColor: Colors.primaryGreen,
+    backgroundColor: Colors.primaryGreen,
+  },
+  roleChipText: {
+    fontSize: 13.5,
+    fontWeight: '700',
+    color: Colors.textDark,
+  },
+  roleChipTextActive: {
+    color: Colors.textWhite,
+  },
+  addRoleBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 10,
+    paddingLeft: 4,
+    paddingVertical: 6,
+  },
+  addRoleText: {
+    fontSize: 13.5,
+    fontWeight: '600',
+    color: Colors.primaryGreen,
   },
 
   /* ─── Menu ─── */

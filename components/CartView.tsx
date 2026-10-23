@@ -1,15 +1,14 @@
 import { View, Text, FlatList, StyleSheet, TouchableOpacity } from 'react-native';
 import { useRouter } from 'expo-router';
 import { MaterialIcons } from '@expo/vector-icons';
+import { Image } from 'expo-image';
 import { Colors } from '../constants/Colors';
 import { useCart } from '../contexts/CartContext';
-import { PRODUCTS } from '../constants/MockData';
-
-const formatPrice = (price: number) => '₦' + price.toLocaleString('en-NG');
+import { formatPrice } from '../lib/backend';
 
 export default function CartView() {
   const router = useRouter();
-  const { items, totalItems, totalPrice, addItem, updateQuantity, removeItem, clearCart } = useCart();
+  const { items, totalItems, totalPrice, updateQuantity, removeItem, clearCart } = useCart();
 
   if (items.length === 0) {
     return (
@@ -29,35 +28,42 @@ export default function CartView() {
     <View style={styles.container}>
       <FlatList
         data={items}
-        keyExtractor={(item) => item.product.id}
+        keyExtractor={(item) => item.product._id}
         contentContainerStyle={styles.list}
         showsVerticalScrollIndicator={false}
         renderItem={({ item }) => (
           <View style={styles.cartItem}>
             <View style={styles.itemEmoji}>
-              <Text style={styles.emoji}>{item.product.imageEmoji}</Text>
+              {item.product.photoUrls[0] ? (
+                <Image source={{ uri: item.product.photoUrls[0] }} style={{ width: 64, height: 64, borderRadius: 8 }} contentFit="cover" />
+              ) : (
+                <Text style={styles.emoji}>📦</Text>
+              )}
             </View>
             <View style={styles.itemInfo}>
               <Text style={styles.itemName} numberOfLines={1}>{item.product.name}</Text>
-              <Text style={styles.itemVendor}>{item.product.vendor}</Text>
+              <View style={styles.vendorRow}>
+                <Text style={styles.itemVendor} numberOfLines={1}>{item.product.storeName}</Text>
+                {item.product.storeVerified && <MaterialIcons name="verified" size={12} color={Colors.primary} />}
+              </View>
               <Text style={styles.itemPrice}>{formatPrice(item.product.price)}</Text>
               <View style={styles.qtyRow}>
                 <TouchableOpacity
                   style={styles.qtyBtn}
-                  onPress={() => updateQuantity(item.product.id, item.quantity - 1)}
+                  onPress={() => updateQuantity(item.product._id, item.quantity - 1)}
                 >
                   <MaterialIcons name="remove" size={16} color={Colors.textDark} />
                 </TouchableOpacity>
                 <Text style={styles.qtyValue}>{item.quantity}</Text>
                 <TouchableOpacity
                   style={styles.qtyBtn}
-                  onPress={() => updateQuantity(item.product.id, item.quantity + 1)}
+                  onPress={() => updateQuantity(item.product._id, item.quantity + 1)}
                 >
                   <MaterialIcons name="add" size={16} color={Colors.textDark} />
                 </TouchableOpacity>
               </View>
             </View>
-            <TouchableOpacity style={styles.removeBtn} onPress={() => removeItem(item.product.id)}>
+            <TouchableOpacity style={styles.removeBtn} onPress={() => removeItem(item.product._id)}>
               <MaterialIcons name="close" size={18} color={Colors.textLight} />
             </TouchableOpacity>
           </View>
@@ -168,6 +174,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 12,
+    overflow: 'hidden',
   },
   emoji: { fontSize: 32 },
   itemInfo: {
@@ -179,9 +186,15 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: Colors.textDark,
   },
+  vendorRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+  },
   itemVendor: {
     fontSize: 11,
     color: Colors.textMedium,
+    flexShrink: 1,
   },
   itemPrice: {
     fontSize: 16,

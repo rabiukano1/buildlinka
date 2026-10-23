@@ -1,4 +1,7 @@
-import { createContext, useContext, useState, useCallback, type ReactNode } from 'react';
+import { createContext, useContext, useMemo, type ReactNode } from 'react';
+import { useMutation, useQuery } from 'convex/react';
+import { api } from '../convex/_generated/api';
+import type { Id } from '../convex/_generated/dataModel';
 
 type FeaturedContextType = {
   popularVendorIds: string[];
@@ -10,30 +13,28 @@ type FeaturedContextType = {
 const FeaturedContext = createContext<FeaturedContextType | null>(null);
 
 export function FeaturedProvider({ children }: { children: ReactNode }) {
-  const [popularVendorIds, setPopularVendorIds] = useState<string[]>([
-    'v1', 'v2', 'v4',
-  ]);
-  const [popularWorkerIds, setPopularWorkerIds] = useState<string[]>([
-    'w1', 'w2', 'w4', 'w6',
-  ]);
+  const stores = useQuery(api.stores.list, { limit: 100 });
+  const workers = useQuery(api.workers.list, { limit: 100 });
+  const setStoreFlags = useMutation(api.admin.setStoreFlags);
+  const setWorkerFlags = useMutation(api.admin.setWorkerFlags);
 
-  const toggleVendorPopular = useCallback((id: string) => {
-    setPopularVendorIds((prev) =>
-      prev.includes(id) ? prev.filter((i) => i !== id) : [...prev, id]
-    );
-  }, []);
+  const popularVendorIds = useMemo(() => (stores ?? []).filter((s) => s.featured).map((s) => s._id), [stores]);
+  const popularWorkerIds = useMemo(() => (workers ?? []).filter((w) => w.featured).map((w) => w._id), [workers]);
 
-  const toggleWorkerPopular = useCallback((id: string) => {
-    setPopularWorkerIds((prev) =>
-      prev.includes(id) ? prev.filter((i) => i !== id) : [...prev, id]
-    );
-  }, []);
+  const value: FeaturedContextType = {
+    popularVendorIds,
+    popularWorkerIds,
+    toggleVendorPopular: (id) => {
+      const featured = !popularVendorIds.includes(id as Id<'stores'>);
+      void setStoreFlags({ id: id as Id<'stores'>, featured });
+    },
+    toggleWorkerPopular: (id) => {
+      const featured = !popularWorkerIds.includes(id as Id<'workers'>);
+      void setWorkerFlags({ id: id as Id<'workers'>, featured });
+    },
+  };
 
-  return (
-    <FeaturedContext.Provider value={{ popularVendorIds, popularWorkerIds, toggleVendorPopular, toggleWorkerPopular }}>
-      {children}
-    </FeaturedContext.Provider>
-  );
+  return <FeaturedContext.Provider value={value}>{children}</FeaturedContext.Provider>;
 }
 
 export function useFeatured() {

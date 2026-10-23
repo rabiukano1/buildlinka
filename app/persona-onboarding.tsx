@@ -9,6 +9,10 @@ import {
   Animated,
 } from 'react-native';
 import { useRouter } from 'expo-router';
+import { useMutation, useQuery } from 'convex/react';
+import { api } from '../convex/_generated/api';
+import { errorMessage, type Role } from '../lib/backend';
+import { Alert } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -129,6 +133,25 @@ export default function PersonaOnboardingScreen() {
 
   const selectedPersona = PERSONAS.find((p) => p.id === selected);
 
+  const setRole = useMutation(api.users.setRole);
+  const me = useQuery(api.users.me);
+
+  // Vendors need a store before their dashboard makes sense; the store step also saves the role.
+  const chooseRole = async () => {
+    if (!selectedPersona) return;
+    const role = selectedPersona.id as Role;
+    if (role === 'vendor' && !me?.store) {
+      router.push('/create-store' as any);
+      return;
+    }
+    try {
+      await setRole({ role });
+      router.replace(selectedPersona.route as any);
+    } catch (err) {
+      Alert.alert('Could not save your choice', errorMessage(err));
+    }
+  };
+
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" />
@@ -172,7 +195,7 @@ export default function PersonaOnboardingScreen() {
         <TouchableOpacity
           style={[styles.continueBtn, !selected && styles.continueBtnDisabled]}
           disabled={!selected}
-          onPress={() => selectedPersona && router.push(selectedPersona.route as any)}
+          onPress={chooseRole}
           activeOpacity={0.85}
         >
           <Text style={[styles.continueBtnText, !selected && styles.continueBtnTextDisabled]}>
@@ -186,7 +209,7 @@ export default function PersonaOnboardingScreen() {
         </TouchableOpacity>
         <TouchableOpacity
           style={styles.skipBtn}
-          onPress={() => router.push('/(tabs)' as any)}
+          onPress={() => setRole({ role: 'buyer' }).catch(() => {}).finally(() => router.replace('/(tabs)' as any))}
           activeOpacity={0.7}
         >
           <Text style={styles.skipText}>Skip for now</Text>

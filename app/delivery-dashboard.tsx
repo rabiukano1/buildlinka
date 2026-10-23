@@ -1,97 +1,81 @@
-import { useState, useCallback } from 'react';
+import { Component, type ReactNode } from 'react';
 import {
   View,
   Text,
   ScrollView,
   StyleSheet,
   TouchableOpacity,
+  ActivityIndicator,
+  Alert,
 } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
 import { MaterialIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useQuery, useMutation } from 'convex/react';
+import { api } from '../convex/_generated/api';
+import type { Id } from '../convex/_generated/dataModel';
+import { formatPrice, errorMessage } from '../lib/backend';
 import { Colors } from '../constants/Colors';
 import { useNotifications } from '../contexts/NotificationContext';
 
-const formatPrice = (price: number) => '₦' + price.toLocaleString('en-NG');
+/** Shown when the signed-in user has no store yet (store queries throw then). */
+function NoStoreState() {
+  const router = useRouter();
+  return (
+    <View style={styles.centerWrap}>
+      <View style={styles.emptyIconWrap}>
+        <MaterialIcons name="store" size={36} color={Colors.primary} />
+      </View>
+      <Text style={styles.emptyTitle}>Create your store first</Text>
+      <Text style={styles.emptySub}>
+        You need a vendor store before you can fulfill and track deliveries.
+      </Text>
+      <TouchableOpacity
+        style={styles.primaryBtn}
+        onPress={() => router.push('/create-store' as any)}
+        activeOpacity={0.8}
+      >
+        <MaterialIcons name="add-business" size={18} color={Colors.onPrimary} />
+        <Text style={styles.primaryBtnText}>Create your store</Text>
+      </TouchableOpacity>
+    </View>
+  );
+}
+
+/** Catches the ConvexError thrown when the user has no store, so the
+ *  screen shows the create-store CTA instead of crashing. */
+class StoreErrorBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
+  state = { failed: false };
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+  render() {
+    if (this.state.failed) return <NoStoreState />;
+    return this.props.children;
+  }
+}
 
 const DELIVERY_STEPS = ['Ordered', 'In Transit', 'Near You', 'Delivered'] as const;
 
-const SHIPMENTS = [
-  {
-    id: 'SHP-001',
-    product: 'Dangote Cement 42.5R (50kg)',
-    emoji: '🏗️',
-    qty: 50,
-    vendor: 'Lagos Building Supplies',
-    destination: 'Ikeja, Lagos',
-    status: 'active' as const,
-    currentStep: 1,
-    eta: 'Today, 4:30 PM',
-    driver: 'Ahmed Musa',
-    driverVehicle: 'Truck - ABC 123 XZ',
-  },
-  {
-    id: 'SHP-002',
-    product: 'Iron Rod 12mm (6m)',
-    emoji: '⚙️',
-    qty: 20,
-    vendor: 'Steel Masters Ltd',
-    destination: 'Surulere, Lagos',
-    status: 'active' as const,
-    currentStep: 2,
-    eta: 'Today, 5:45 PM',
-    driver: 'Chidi Okonkwo',
-    driverVehicle: 'Truck - XYZ 789 GT',
-  },
-  {
-    id: 'SHP-003',
-    product: 'Ceramic Floor Tiles 60x60cm',
-    emoji: '🏛️',
-    qty: 30,
-    vendor: 'TileWorld Nigeria',
-    destination: 'Victoria Island, Lagos',
-    status: 'active' as const,
-    currentStep: 0,
-    eta: 'Tomorrow, 10:00 AM',
-    driver: 'Bello Ibrahim',
-    driverVehicle: 'Van - DEF 456 RT',
-  },
-  {
-    id: 'SHP-004',
-    product: 'Emulsion Paint 20L (White)',
-    emoji: '🎨',
-    qty: 5,
-    vendor: 'ColourShop Abuja',
-    destination: 'Wuse, Abuja',
-    status: 'completed' as const,
-    currentStep: 3,
-    eta: 'Delivered 2 hrs ago',
-    driver: 'Suleiman Yahaya',
-    driverVehicle: 'Van - GHI 321 JK',
-  },
-  {
-    id: 'SHP-005',
-    product: 'PVC Water Pipe 3/4 inch (9m)',
-    emoji: '🔧',
-    qty: 15,
-    vendor: 'PlumbShop PH',
-    destination: 'Port Harcourt',
-    status: 'delayed' as const,
-    currentStep: 1,
-    eta: 'Delayed - ETA TBD',
-    driver: 'Emeka Okafor',
-    driverVehicle: 'Truck - JKL 654 MN',
-  },
-];
+const STEP_FOR_STATUS: Record<string, number> = {
+  pending: 0,
+  confirmed: 1,
+  shipped: 2,
+  delivered: 3,
+};
 
-const LOGISTICS_ALERTS = [
-  { id: 'a1', type: 'delay', message: 'SHP-005 held up at Port Harcourt checkpoint', time: '15 min ago' },
-  { id: 'a2', type: 'info', message: 'SHP-001 driver approaching Ikeja delivery zone', time: '5 min ago' },
-  { id: 'a3', type: 'warning', message: 'Traffic reported on Lagos-Ibadan expressway', time: '30 min ago' },
-];
+type Order = {
+  _id: string;
+  number: string;
+  status: 'pending' | 'confirmed' | 'shipped' | 'delivered' | 'cancelled';
+  buyerName: string;
+  items: { name: string; unit: string; price: number; quantity: number }[];
+  total: number;
+  deliveryMethod: string;
+  _creationTime: number;
+};
 
-function StepProgress({ currentStep, status }: { currentStep: number; status: string }) {
+function StepProgress({ currentStep }: { currentStep: number }) {
   const stepCount = DELIVERY_STEPS.length;
   return (
     <View style={styles.stepsContainer}>
@@ -105,23 +89,19 @@ function StepProgress({ currentStep, status }: { currentStep: number; status: st
               <View
                 style={[
                   styles.stepDot,
-                  isCompleted && status !== 'delayed' && styles.stepDotActive,
-                  isCurrent && status !== 'delayed' && styles.stepDotCurrent,
-                  status === 'delayed' && i === currentStep && styles.stepDotDelayed,
+                  isCompleted && styles.stepDotActive,
+                  isCurrent && styles.stepDotCurrent,
                 ]}
               >
-                {isCompleted && status !== 'delayed' ? (
+                {isCompleted && (
                   <MaterialIcons name="check" size={10} color="#fff" />
-                ) : status === 'delayed' && i === currentStep ? (
-                  <MaterialIcons name="warning" size={10} color="#fff" />
-                ) : null}
+                )}
               </View>
               {!isLast && (
                 <View
                   style={[
                     styles.stepLine,
-                    isCompleted && status !== 'delayed' && styles.stepLineActive,
-                    status === 'delayed' && i === currentStep - 1 && styles.stepLineActive,
+                    isCompleted && styles.stepLineActive,
                   ]}
                 />
               )}
@@ -143,61 +123,220 @@ function StepProgress({ currentStep, status }: { currentStep: number; status: st
 }
 
 function ShipmentCard({
-  shipment,
+  order,
+  onAdvance,
+  onCancel,
 }: {
-  shipment: typeof SHIPMENTS[0];
+  order: Order;
+  onAdvance: (order: Order) => void;
+  onCancel: (order: Order) => void;
 }) {
-  const statusColor =
-    shipment.status === 'active' ? Colors.primary :
-    shipment.status === 'completed' ? Colors.success : Colors.error;
-  const statusLabel =
-    shipment.status === 'active' ? 'In Progress' :
-    shipment.status === 'completed' ? 'Completed' : 'Delayed';
+  const isDelivered = order.status === 'delivered';
+  const statusColor = isDelivered ? Colors.success : Colors.primary;
+  const statusLabel = isDelivered ? 'Completed' : order.status === 'pending' ? 'New order' : order.status === 'confirmed' ? 'Confirmed' : 'Shipped';
+  const itemSummary = order.items.map((i) => `${i.name} x ${i.quantity}`).join(', ');
+  const delivery = useQuery(api.delivery.byOrder, { orderId: order._id as Id<'orders'> });
 
   return (
     <View style={[styles.shipCard, { borderLeftColor: statusColor }]}>
       <View style={styles.shipHeader}>
         <View style={styles.shipHeaderLeft}>
           <View style={[styles.shipStatusDot, { backgroundColor: statusColor }]} />
-          <Text style={styles.shipId}>{shipment.id}</Text>
+          <Text style={styles.shipId}>{order.number}</Text>
           <View style={[styles.shipStatusBadge, { backgroundColor: statusColor + '15' }]}>
             <Text style={[styles.shipStatusText, { color: statusColor }]}>{statusLabel}</Text>
           </View>
         </View>
-        <Text style={styles.shipEta}>{shipment.eta}</Text>
+        <Text style={styles.shipEta}>{new Date(order._creationTime).toLocaleDateString()}</Text>
       </View>
 
       <View style={styles.shipBody}>
-        <Text style={styles.shipEmoji}>{shipment.emoji}</Text>
+        <Text style={styles.shipEmoji}>📦</Text>
         <View style={styles.shipInfo}>
-          <Text style={styles.shipProduct} numberOfLines={1}>{shipment.product}</Text>
-          <Text style={styles.shipDetail}>Qty: {shipment.qty} · {shipment.vendor}</Text>
+          <Text style={styles.shipProduct} numberOfLines={1}>{order.buyerName}</Text>
+          <Text style={styles.shipDetail} numberOfLines={2}>{itemSummary}</Text>
           <Text style={styles.shipDetail}>
-            <MaterialIcons name="location-on" size={11} color={Colors.textLight} /> {shipment.destination}
+            {order.deliveryMethod === 'pickup' ? 'Customer pickup' : `Delivery · ${order.deliveryMethod}`}
           </Text>
         </View>
       </View>
 
-      <StepProgress currentStep={shipment.currentStep} status={shipment.status} />
+      <StepProgress currentStep={STEP_FOR_STATUS[order.status] ?? 0} />
 
       <View style={styles.shipDriver}>
-        <MaterialIcons name="local-shipping" size={15} color={Colors.textMedium} />
+        <MaterialIcons name="payments" size={15} color={Colors.textMedium} />
         <Text style={styles.shipDriverText}>
-          {shipment.driver} · {shipment.driverVehicle}
+          Total {formatPrice(order.total)}
         </Text>
       </View>
+
+      {delivery && (
+        <View style={styles.deliveryBox}>
+          <View style={styles.deliveryRow}>
+            <MaterialIcons name="local-shipping" size={15} color={Colors.primary} />
+            <Text style={styles.deliveryCode}>Tracking {delivery.trackingCode}</Text>
+            <View style={styles.deliveryStatus}>
+              <Text style={styles.deliveryStatusText}>{delivery.status.replace('_', ' ')}</Text>
+            </View>
+          </View>
+          <Text style={styles.deliveryMeta}>
+            {delivery.courierName ? `Courier: ${delivery.courierName}` : 'Waiting for a courier to claim this delivery'}
+          </Text>
+          {!!delivery.estimatedAt && <Text style={styles.deliveryMeta}>ETA {new Date(delivery.estimatedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}</Text>}
+        </View>
+      )}
+
+      {!isDelivered && (
+        <View style={styles.shipActions}>
+          <TouchableOpacity style={styles.advanceBtn} onPress={() => onAdvance(order)} activeOpacity={0.8}>
+            <Text style={styles.advanceBtnText}>
+              {order.status === 'pending' ? 'Confirm' : order.status === 'confirmed' ? 'Mark shipped' : 'Mark delivered'}
+            </Text>
+          </TouchableOpacity>
+          {order.status !== 'shipped' && (
+            <TouchableOpacity style={styles.cancelBtn} onPress={() => onCancel(order)} activeOpacity={0.8}>
+              <Text style={styles.cancelBtnText}>Cancel</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      )}
     </View>
+  );
+}
+
+function DeliveryBody() {
+  const orders = useQuery(api.orders.forMyStore);
+  const setStatus = useMutation(api.orders.setStatus);
+
+  const handleAdvance = async (order: Order) => {
+    const next = order.status === 'pending' ? 'confirmed' : order.status === 'confirmed' ? 'shipped' : 'delivered';
+    try {
+      await setStatus({ id: order._id as never, status: next as never });
+    } catch (e) {
+      Alert.alert('Could not update order', errorMessage(e));
+    }
+  };
+
+  const handleCancel = (order: Order) => {
+    Alert.alert('Cancel order?', `Cancel ${order.number}? Stock will be returned to your inventory.`, [
+      { text: 'Keep', style: 'cancel' },
+      {
+        text: 'Cancel order',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await setStatus({ id: order._id as never, status: 'cancelled' as never });
+          } catch (e) {
+            Alert.alert('Could not cancel', errorMessage(e));
+          }
+        },
+      },
+    ]);
+  };
+
+  if (orders === undefined) {
+    return (
+      <View style={styles.centerWrap}>
+        <ActivityIndicator size="large" color={Colors.primary} />
+        <Text style={styles.emptySub}>Loading deliveries…</Text>
+      </View>
+    );
+  }
+
+  const active = orders.filter((o) => o.status === 'pending' || o.status === 'confirmed' || o.status === 'shipped');
+  const completedCount = orders.filter((o) => o.status === 'delivered').length;
+  const cancelledCount = orders.filter((o) => o.status === 'cancelled').length;
+
+  return (
+    <ScrollView
+      style={styles.scrollView}
+      contentContainerStyle={styles.scrollContent}
+      showsVerticalScrollIndicator={false}
+    >
+      {/* ─── Map Header ─── */}
+      <LinearGradient
+        colors={[Colors.primary, Colors.primaryContainer]}
+        style={styles.mapHeader}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+      >
+        <View style={styles.mapGrid}>
+          {Array.from({ length: 12 }).map((_, i) => (
+            <View key={i} style={styles.mapGridCell} />
+          ))}
+        </View>
+        <View style={styles.mapRouteLine} />
+        <View style={[styles.mapPin, styles.mapPinStart]}>
+          <MaterialIcons name="location-on" size={18} color="#fff" />
+        </View>
+        <View style={[styles.mapPin, styles.mapPinEnd]}>
+          <MaterialIcons name="flag" size={18} color="#fff" />
+        </View>
+        <View style={[styles.mapPin, styles.mapPinMid]}>
+          <MaterialIcons name="local-shipping" size={16} color="#fff" />
+        </View>
+        <View style={styles.mapOverlay}>
+          <MaterialIcons name="my-location" size={14} color="rgba(255,255,255,0.7)" />
+          <Text style={styles.mapText}>Fulfilling store orders</Text>
+        </View>
+      </LinearGradient>
+
+      {/* ─── Status Counters (real order counts) ─── */}
+      <View style={styles.counterRow}>
+        <View style={[styles.counterCard, { borderLeftColor: Colors.primary }]}>
+          <Text style={styles.counterValue}>{active.length}</Text>
+          <Text style={styles.counterLabel}>Active</Text>
+        </View>
+        <View style={[styles.counterCard, { borderLeftColor: Colors.success }]}>
+          <Text style={[styles.counterValue, { color: Colors.success }]}>{completedCount}</Text>
+          <Text style={styles.counterLabel}>Completed</Text>
+        </View>
+        <View style={[styles.counterCard, { borderLeftColor: Colors.error }]}>
+          <Text style={[styles.counterValue, { color: Colors.error }]}>{cancelledCount}</Text>
+          <Text style={styles.counterLabel}>Cancelled</Text>
+        </View>
+      </View>
+
+      {/* ─── Active Shipments ─── */}
+      <Text style={styles.sectionTitle}>
+        Active Shipments
+        <Text style={styles.sectionCount}> ({active.length})</Text>
+      </Text>
+      {active.length === 0 ? (
+        <View style={styles.shipCard}>
+          <Text style={styles.emptySub}>No active deliveries. New customer orders will appear here.</Text>
+        </View>
+      ) : (
+        active.map((order) => (
+          <ShipmentCard key={order._id} order={order as unknown as Order} onAdvance={handleAdvance} onCancel={handleCancel} />
+        ))
+      )}
+    </ScrollView>
   );
 }
 
 export default function DeliveryDashboardScreen() {
   const router = useRouter();
   const { unreadCount } = useNotifications();
+  const me = useQuery(api.users.me);
 
-  const activeCount = SHIPMENTS.filter((s) => s.status === 'active').length;
-  const completedCount = SHIPMENTS.filter((s) => s.status === 'completed').length;
-  const delayedCount = SHIPMENTS.filter((s) => s.status === 'delayed').length;
-  const activeShipments = SHIPMENTS.filter((s) => s.status !== 'completed');
+  if (me === undefined) {
+    return (
+      <View style={styles.container}>
+        <Stack.Screen
+          options={{
+            headerShown: true,
+            headerTitle: 'Delivery Dashboard',
+            headerBackTitle: 'Back',
+            headerTintColor: Colors.primary,
+          }}
+        />
+        <View style={styles.centerWrap}>
+          <ActivityIndicator size="large" color={Colors.primary} />
+        </View>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>
@@ -221,94 +360,13 @@ export default function DeliveryDashboardScreen() {
           ),
         }}
       />
-      <ScrollView
-        style={styles.scrollView}
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
-      >
-        {/* ─── Map Header ─── */}
-        <LinearGradient
-          colors={[Colors.primary, Colors.primaryContainer]}
-          style={styles.mapHeader}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-        >
-          <View style={styles.mapGrid}>
-            {Array.from({ length: 12 }).map((_, i) => (
-              <View key={i} style={styles.mapGridCell} />
-            ))}
-          </View>
-          <View style={styles.mapRouteLine} />
-          <View style={[styles.mapPin, styles.mapPinStart]}>
-            <MaterialIcons name="location-on" size={18} color="#fff" />
-          </View>
-          <View style={[styles.mapPin, styles.mapPinEnd]}>
-            <MaterialIcons name="flag" size={18} color="#fff" />
-          </View>
-          <View style={[styles.mapPin, styles.mapPinMid]}>
-            <MaterialIcons name="local-shipping" size={16} color="#fff" />
-          </View>
-          <View style={styles.mapOverlay}>
-            <MaterialIcons name="my-location" size={14} color="rgba(255,255,255,0.7)" />
-            <Text style={styles.mapText}>Live tracking active</Text>
-          </View>
-        </LinearGradient>
-
-        {/* ─── Status Counters ─── */}
-        <View style={styles.counterRow}>
-          <View style={[styles.counterCard, { borderLeftColor: Colors.primary }]}>
-            <Text style={styles.counterValue}>{activeCount}</Text>
-            <Text style={styles.counterLabel}>Active</Text>
-          </View>
-          <View style={[styles.counterCard, { borderLeftColor: Colors.success }]}>
-            <Text style={[styles.counterValue, { color: Colors.success }]}>{completedCount}</Text>
-            <Text style={styles.counterLabel}>Completed</Text>
-          </View>
-          <View style={[styles.counterCard, { borderLeftColor: Colors.error }]}>
-            <Text style={[styles.counterValue, { color: Colors.error }]}>{delayedCount}</Text>
-            <Text style={styles.counterLabel}>Delayed</Text>
-          </View>
-        </View>
-
-        {/* ─── Logistics Alerts ─── */}
-        {LOGISTICS_ALERTS.length > 0 && (
-          <View style={styles.alertsCard}>
-            <View style={styles.alertsHeader}>
-              <MaterialIcons name="notifications" size={18} color={Colors.warning} />
-              <Text style={styles.alertsTitle}>Logistics Alerts</Text>
-              <View style={styles.alertsCount}>
-                <Text style={styles.alertsCountText}>{LOGISTICS_ALERTS.length}</Text>
-              </View>
-            </View>
-            {LOGISTICS_ALERTS.map((alert) => {
-              const iconName =
-                alert.type === 'delay' ? 'error' :
-                alert.type === 'warning' ? 'warning' : 'info';
-              const iconColor =
-                alert.type === 'delay' ? Colors.error :
-                alert.type === 'warning' ? Colors.warning : Colors.info;
-              return (
-                <View key={alert.id} style={styles.alertItem}>
-                  <MaterialIcons name={iconName as any} size={16} color={iconColor} />
-                  <View style={styles.alertContent}>
-                    <Text style={styles.alertMessage}>{alert.message}</Text>
-                    <Text style={styles.alertTime}>{alert.time}</Text>
-                  </View>
-                </View>
-              );
-            })}
-          </View>
-        )}
-
-        {/* ─── Active Shipments ─── */}
-        <Text style={styles.sectionTitle}>
-          Active Shipments
-          <Text style={styles.sectionCount}> ({activeShipments.length})</Text>
-        </Text>
-        {activeShipments.map((shipment) => (
-          <ShipmentCard key={shipment.id} shipment={shipment} />
-        ))}
-      </ScrollView>
+      {!me?.store ? (
+        <NoStoreState />
+      ) : (
+        <StoreErrorBoundary>
+          <DeliveryBody />
+        </StoreErrorBoundary>
+      )}
     </View>
   );
 }
@@ -317,6 +375,13 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: Colors.background,
+  },
+  centerWrap: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 32,
+    gap: 8,
   },
   headerNotifBadge: {
     position: 'absolute',
@@ -443,65 +508,6 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
 
-  /* ─── Alerts ─── */
-  alertsCard: {
-    backgroundColor: Colors.card,
-    borderRadius: 8,
-    padding: 14,
-    borderLeftWidth: 3,
-    borderLeftColor: Colors.warning,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.04,
-    shadowRadius: 3,
-    elevation: 1,
-  },
-  alertsHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginBottom: 10,
-  },
-  alertsTitle: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: Colors.textDark,
-    flex: 1,
-  },
-  alertsCount: {
-    backgroundColor: Colors.warning,
-    borderRadius: 99,
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-  },
-  alertsCountText: {
-    color: '#fff',
-    fontSize: 11,
-    fontWeight: '700',
-  },
-  alertItem: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 8,
-    paddingVertical: 8,
-    borderTopWidth: 1,
-    borderTopColor: Colors.divider,
-  },
-  alertContent: {
-    flex: 1,
-    gap: 2,
-  },
-  alertMessage: {
-    fontSize: 12,
-    color: Colors.textDark,
-    fontWeight: '500',
-    lineHeight: 17,
-  },
-  alertTime: {
-    fontSize: 10,
-    color: Colors.textLight,
-  },
-
   /* ─── Section ─── */
   sectionTitle: {
     fontSize: 15,
@@ -616,9 +622,6 @@ const styles = StyleSheet.create({
     height: 24,
     borderRadius: 12,
   },
-  stepDotDelayed: {
-    backgroundColor: Colors.error,
-  },
   stepLine: {
     flex: 1,
     height: 2,
@@ -658,4 +661,44 @@ const styles = StyleSheet.create({
     color: Colors.textMedium,
     flex: 1,
   },
+  deliveryBox: {
+    marginTop: 8,
+    padding: 10,
+    borderRadius: 8,
+    backgroundColor: Colors.surfaceVariant,
+    gap: 3,
+  },
+  deliveryRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  deliveryCode: { flex: 1, fontSize: 11, fontWeight: '700', color: Colors.textDark },
+  deliveryStatus: { paddingHorizontal: 7, paddingVertical: 2, borderRadius: 999, backgroundColor: Colors.greenTint },
+  deliveryStatusText: { fontSize: 9, fontWeight: '700', color: Colors.primary, textTransform: 'capitalize' },
+  deliveryMeta: { fontSize: 10, color: Colors.textMedium },
+  shipActions: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  advanceBtn: {
+    flex: 1,
+    alignItems: 'center',
+    backgroundColor: Colors.primary,
+    borderRadius: 99,
+    paddingVertical: 10,
+  },
+  advanceBtnText: { fontSize: 13, fontWeight: '700', color: '#fff' },
+  cancelBtn: {
+    alignItems: 'center',
+    borderRadius: 99,
+    paddingVertical: 10,
+    paddingHorizontal: 18,
+    borderWidth: 1,
+    borderColor: Colors.error + '50',
+  },
+  cancelBtnText: { fontSize: 13, fontWeight: '700', color: Colors.error },
+
+  /* ─── Empty ─── */
+  emptyIconWrap: { width: 72, height: 72, borderRadius: 36, backgroundColor: Colors.greenTint + '80', alignItems: 'center', justifyContent: 'center', marginBottom: 4 },
+  emptyTitle: { fontSize: 18, fontWeight: '700', color: Colors.textDark, textAlign: 'center' },
+  emptySub: { fontSize: 13, color: Colors.textLight, textAlign: 'center', paddingHorizontal: 8 },
+  primaryBtn: { flexDirection: 'row', alignItems: 'center', gap: 8, height: 48, paddingHorizontal: 24, borderRadius: 999, backgroundColor: Colors.primary, marginTop: 8 },
+  primaryBtnText: { fontSize: 15, fontWeight: '700', color: Colors.onPrimary },
 });

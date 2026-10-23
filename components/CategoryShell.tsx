@@ -1,12 +1,14 @@
-import { Children, useState, type ReactNode } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Alert } from 'react-native';
+import { Children, useMemo, useState, type ReactNode } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, Alert, ActivityIndicator } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
 import { MaterialIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { StatusBar } from 'expo-status-bar';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useQuery } from 'convex/react';
+import { api } from '../convex/_generated/api';
+import { type BackendProduct } from '../lib/backend';
 import { Colors } from '../constants/Colors';
-import { PRODUCTS, VENDORS, type Product } from '../constants/MockData';
 import { useCart } from '../contexts/CartContext';
 import { useSaved } from '../contexts/SavedItemsContext';
 import ProductCard from './ProductCard';
@@ -38,8 +40,16 @@ export default function CategoryShell({ title, category, emoji, heroTitle, heroS
   const { addItem } = useCart();
   const { isSaved, toggleSave } = useSaved();
   const [openTip, setOpenTip] = useState<number | null>(0);
-  const products = PRODUCTS.filter((p) => p.category === category);
-  const vendor = VENDORS.find((v) => v.category === category);
+  const products = useQuery(api.products.list, { category });
+  const stores = useMemo(() => {
+    const seen = new Map<string, { id: string; name: string; location: string; verified: boolean }>();
+    for (const p of products ?? []) {
+      if (!seen.has(p.storeId)) {
+        seen.set(p.storeId, { id: p.storeId, name: p.storeName, location: p.storeLocation, verified: p.storeVerified });
+      }
+    }
+    return [...seen.values()];
+  }, [products]);
 
   return (
     <View style={s.container}>
@@ -69,9 +79,14 @@ export default function CategoryShell({ title, category, emoji, heroTitle, heroS
         </View>
 
         <Text style={[s.sectionTitle, s.sectionGap]}>{category} products</Text>
-        {products.length ? (
+        {products === undefined ? (
+          <View style={[s.card, s.emptyProducts]}>
+            <ActivityIndicator size="large" color={Colors.primary} />
+            <Text style={s.emptySub}>Loading products…</Text>
+          </View>
+        ) : products.length ? (
           products.map((p) => (
-            <ProductCard key={p.id} product={p} horizontal onPress={() => router.push(`/product/${p.id}`)} onAddToCart={() => addItem(p)} onToggleSave={() => toggleSave(p)} isSaved={isSaved(p.id)} />
+            <ProductCard key={p._id} product={p} horizontal onPress={() => router.push(`/product/${p._id}`)} onAddToCart={() => addItem(p)} onToggleSave={() => toggleSave(p)} isSaved={isSaved(p._id)} />
           ))
         ) : (
           <View style={[s.card, s.emptyProducts]}>
@@ -81,19 +96,18 @@ export default function CategoryShell({ title, category, emoji, heroTitle, heroS
           </View>
         )}
 
-        {vendor && (
-          <View style={[s.card, s.vendor]}>
-            <Text style={s.vendorEmoji}>{vendor.emoji}</Text>
+        {stores.map((store) => (
+          <View key={store.id} style={[s.card, s.vendor]}>
+            <MaterialIcons name="store" size={32} color={Colors.primary} />
             <View style={s.flex}>
               <View style={s.vendorNameRow}>
-                <Text style={s.vendorName}>{vendor.name}</Text>
-                {vendor.verified && <MaterialIcons name="verified" size={16} color={Colors.primary} />}
+                <Text style={s.vendorName}>{store.name}</Text>
+                {store.verified && <MaterialIcons name="verified" size={16} color={Colors.primary} />}
               </View>
-              <Text style={s.vendorMeta}>★ {vendor.rating} · {vendor.location}</Text>
-              <Text style={s.vendorDesc}>{vendor.description}</Text>
+              {!!store.location && <Text style={s.vendorMeta}>{store.location}</Text>}
             </View>
           </View>
-        )}
+        ))}
 
         <TouchableOpacity style={s.hire} onPress={() => router.push('/(tabs)/workers' as any)} activeOpacity={0.85}>
           <View style={s.hireIcon}>
@@ -215,10 +229,11 @@ export function Footnote({ children }: { children: ReactNode }) {
 }
 
 /** Cost line + add-to-cart for `qty` units of `product`, or a notice when nothing is stocked. */
-export function OrderLine({ product, qty, what, missingText }: { product?: Product; qty: number; what: string; missingText: string }) {
+export function OrderLine({ product, qty, what, missingText }: { product?: BackendProduct; qty: number; what: string; missingText: string }) {
   const router = useRouter();
   const { addItem } = useCart();
   if (!product) return <Notice text={missingText} />;
+  const inStock = product.stock > 0;
   const add = () => {
     addItem(product, qty);
     Alert.alert('Added to cart', `${qty} × ${product.name}`, [
@@ -232,9 +247,9 @@ export function OrderLine({ product, qty, what, missingText }: { product?: Produ
         <Text style={s.costLabel}>{qty.toLocaleString('en-NG')} {what} × {formatPrice(product.price)}</Text>
         <Text style={s.cost}>{formatPrice(product.price * qty)}</Text>
       </View>
-      <TouchableOpacity style={[s.cta, !product.inStock && s.ctaOff]} onPress={add} disabled={!product.inStock || qty <= 0} activeOpacity={0.8}>
+      <TouchableOpacity style={[s.cta, !inStock && s.ctaOff]} onPress={add} disabled={!inStock || qty <= 0} activeOpacity={0.8}>
         <MaterialIcons name="add-shopping-cart" size={20} color={Colors.onSecondary} />
-        <Text style={s.ctaText}>{product.inStock ? `Add ${qty.toLocaleString('en-NG')} ${what} to cart` : 'Out of stock'}</Text>
+        <Text style={s.ctaText}>{inStock ? `Add ${qty.toLocaleString('en-NG')} ${what} to cart` : 'Out of stock'}</Text>
       </TouchableOpacity>
     </>
   );

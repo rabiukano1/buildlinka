@@ -8,31 +8,46 @@ import {
   Animated,
   RefreshControl,
   StatusBar,
+  ActivityIndicator,
 } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
 import { MaterialIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useQuery } from 'convex/react';
+import { api } from '../convex/_generated/api';
+import { formatPrice, goBackOrHome } from '../lib/backend';
 import { Colors } from '../constants/Colors';
 import { useNotifications } from '../contexts/NotificationContext';
-import { PRODUCTS, CATEGORIES } from '../constants/MockData';
+import { useSaved } from '../contexts/SavedItemsContext';
 import Dropdown from '../components/Dropdown';
 
 // "Steel & Iron" -> "steel-iron", matching the files in app/category/.
 const categorySlug = (name: string) => name.toLowerCase().replace(/&/g, '').trim().replace(/\s+/g, '-');
 
-const formatPrice = (price: number) => '₦' + price.toLocaleString('en-NG');
+// Local category names only — no counts (no catalogue counts shown).
+const CATEGORY_NAMES = ['Cement', 'Steel & Iron', 'Roofing', 'Electrical', 'Plumbing', 'Tiles', 'Timber', 'Equipment', 'Glass', 'Paint', 'Blocks'];
 
-const RECENT_ORDERS = [
-  { id: 'ORD-201', item: 'Dangote Cement 42.5R (50kg) x 5', total: 42500, status: 'shipped', date: '2 days ago', emoji: '🏗️' },
-  { id: 'ORD-202', item: 'Iron Rod 12mm x 3', total: 20400, status: 'processing', date: '4 days ago', emoji: '⚙️' },
-  { id: 'ORD-203', item: 'Ceramic Tiles 60x60 x 10m²', total: 35000, status: 'delivered', date: '1 week ago', emoji: '🏛️' },
-];
+const CATEGORY_ICONS: Record<string, string> = {
+  'Cement': 'layers',
+  'Steel & Iron': 'build',
+  'Roofing': 'home',
+  'Electrical': 'flash-on',
+  'Plumbing': 'water',
+  'Tiles': 'grid-on',
+  'Timber': 'forest',
+  'Equipment': 'precision-manufacturing',
+  'Glass': 'window',
+  'Paint': 'color-lens',
+  'Blocks': 'view-module',
+};
 
 const ORDER_STATUS: Record<string, { label: string; icon: string; color: string }> = {
+  pending: { label: 'Pending', icon: 'hourglass-top', color: Colors.warning },
+  confirmed: { label: 'Confirmed', icon: 'check-circle', color: Colors.info },
   shipped: { label: 'Shipped', icon: 'local-shipping', color: Colors.info },
-  processing: { label: 'Processing', icon: 'hourglass-top', color: Colors.warning },
   delivered: { label: 'Delivered', icon: 'check-circle', color: Colors.success },
+  cancelled: { label: 'Cancelled', icon: 'cancel', color: Colors.error },
 };
 
 function AnimatedStatBox({ value, label, icon, color, delay }: { value: string; label: string; icon: string; color: string; delay: number }) {
@@ -60,14 +75,22 @@ export default function BuyerDashboardScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { unreadCount } = useNotifications();
+  const { items: savedItems } = useSaved();
   const [refreshing, setRefreshing] = useState(false);
+
+  const me = useQuery(api.users.me);
+  const products = useQuery(api.products.list, {});
+  const orders = useQuery(api.orders.mine, {});
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
     setTimeout(() => setRefreshing(false), 1500);
   }, []);
 
-  const topProducts = PRODUCTS.slice(0, 4);
+  const greetingName = me?.name ? me.name.split(' ')[0] : 'there';
+  const newest = products?.slice(0, 4) ?? [];
+  const recentOrders = orders?.slice(0, 3) ?? [];
+  const activeOrders = orders?.filter((o) => o.status !== 'delivered' && o.status !== 'cancelled').length ?? 0;
 
   return (
     <View style={styles.container}>
@@ -81,7 +104,7 @@ export default function BuyerDashboardScreen() {
         end={{ x: 1, y: 1 }}
       >
         <View style={styles.headerRow}>
-          <TouchableOpacity style={styles.backBtn} onPress={() => router.back()} activeOpacity={0.7}>
+          <TouchableOpacity style={styles.backBtn} onPress={() => goBackOrHome()} activeOpacity={0.7}>
             <MaterialIcons name="arrow-back" size={22} color="#fff" />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>My Dashboard</Text>
@@ -102,7 +125,7 @@ export default function BuyerDashboardScreen() {
           </View>
           <View style={styles.headerInfo}>
             <Text style={styles.headerGreeting}>Welcome back!</Text>
-            <Text style={styles.headerName}>Dear Customer</Text>
+            <Text style={styles.headerName}>{me === undefined ? '…' : me ? `Hello, ${greetingName}` : 'Dear Customer'}</Text>
             <Text style={styles.headerTagline}>
               Find materials, hire workers, and track your projects.
             </Text>
@@ -118,12 +141,12 @@ export default function BuyerDashboardScreen() {
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.primary} colors={[Colors.primary, Colors.secondary]} progressBackgroundColor="#fff" />
         }
       >
-        {/* ─── Quick Stats ─── */}
+        {/* ─── Quick Stats (real data only) ─── */}
         <View style={styles.statsGrid}>
-          <AnimatedStatBox value="3" label="Active Orders" icon="receipt" color={Colors.primary} delay={0} />
-          <AnimatedStatBox value="12" label="Saved Items" icon="bookmark" color={Colors.secondary} delay={100} />
-          <AnimatedStatBox value="5" label="Workers Hired" icon="people" color={Colors.tertiary} delay={200} />
-          <AnimatedStatBox value="2" label="Projects" icon="construction" color={Colors.info} delay={300} />
+          <AnimatedStatBox value={orders === undefined ? '…' : String(activeOrders)} label="Active Orders" icon="receipt" color={Colors.primary} delay={0} />
+          <AnimatedStatBox value={String(savedItems.length)} label="Saved Items" icon="bookmark" color={Colors.secondary} delay={100} />
+          <AnimatedStatBox value={products === undefined ? '…' : String(products.length)} label="Products Live" icon="inventory-2" color={Colors.tertiary} delay={200} />
+          <AnimatedStatBox value={orders === undefined ? '…' : String(orders.length)} label="Total Orders" icon="construction" color={Colors.info} delay={300} />
         </View>
 
         {/* ─── Shop by Category ─── */}
@@ -139,39 +162,49 @@ export default function BuyerDashboardScreen() {
               title="Categories"
               value=""
               placeholder={{ label: 'Choose a category', icon: 'category' }}
-              options={CATEGORIES.filter((c) => c.name !== 'More').map((c) => ({ value: categorySlug(c.name), label: c.name, icon: c.icon, count: c.count }))}
+              options={CATEGORY_NAMES.map((name) => ({ value: categorySlug(name), label: name, icon: CATEGORY_ICONS[name] ?? 'category' }))}
               onChange={(slug) => router.push(`/category/${slug}` as any)}
             />
           </View>
         </View>
 
-        {/* ─── Recommended Products ─── */}
+        {/* ─── Newest Products ─── */}
         <View style={styles.productsSection}>
           <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Recommended for You</Text>
+            <Text style={styles.sectionTitle}>Newest Products</Text>
             <TouchableOpacity onPress={() => router.push('/(tabs)' as any)}>
               <Text style={styles.viewAll}>See All</Text>
             </TouchableOpacity>
           </View>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.productsRow}>
-            {topProducts.map((product) => (
-              <TouchableOpacity
-                key={product.id}
-                style={styles.productCard}
-                onPress={() => router.push(`/product/${product.id}` as any)}
-              >
-                <View style={styles.productEmojiWrap}>
-                  <Text style={styles.productEmoji}>{product.imageEmoji}</Text>
-                </View>
-                <Text style={styles.productName} numberOfLines={1}>{product.name}</Text>
-                <Text style={styles.productPrice}>{formatPrice(product.price)}/{product.unit}</Text>
-                <View style={styles.productRating}>
-                  <MaterialIcons name="star" size={11} color={Colors.warning} />
-                  <Text style={styles.productRatingText}>{product.rating}</Text>
-                </View>
-              </TouchableOpacity>
-            ))}
-          </ScrollView>
+          {products === undefined ? (
+            <ActivityIndicator size="large" color={Colors.primary} style={{ paddingVertical: 24 }} />
+          ) : newest.length === 0 ? (
+            <View style={styles.productsEmpty}>
+              <MaterialIcons name="inventory-2" size={32} color={Colors.textMuted} />
+              <Text style={styles.productsEmptyText}>No products live yet. Check back soon.</Text>
+            </View>
+          ) : (
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.productsRow}>
+              {newest.map((product) => (
+                <TouchableOpacity
+                  key={product._id}
+                  style={styles.productCard}
+                  onPress={() => router.push(`/product/${product._id}` as any)}
+                >
+                  <View style={styles.productEmojiWrap}>
+                    <Text style={styles.productEmoji}>📦</Text>
+                  </View>
+                  <Text style={styles.productName} numberOfLines={1}>{product.name}</Text>
+                  <Text style={styles.productPrice}>{formatPrice(product.price)}/{product.unit}</Text>
+                  <View style={styles.productRating}>
+                    <MaterialIcons name="store" size={11} color={Colors.textMuted} />
+                    <Text style={styles.productRatingText} numberOfLines={1}>{product.storeName}</Text>
+                    {product.storeVerified && <MaterialIcons name="verified" size={11} color={Colors.primary} />}
+                  </View>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          )}
         </View>
 
         {/* ─── Recent Orders ─── */}
@@ -182,27 +215,39 @@ export default function BuyerDashboardScreen() {
               <Text style={styles.viewAll}>View All</Text>
             </TouchableOpacity>
           </View>
-          {RECENT_ORDERS.map((order) => {
-            const status = ORDER_STATUS[order.status] || ORDER_STATUS.processing;
-            return (
-              <View key={order.id} style={styles.orderCard}>
-                <View style={styles.orderCardLeft}>
-                  <Text style={styles.orderEmoji}>{order.emoji}</Text>
-                  <View style={styles.orderInfo}>
-                    <Text style={styles.orderItem} numberOfLines={1}>{order.item}</Text>
-                    <Text style={styles.orderTotal}>{formatPrice(order.total)}</Text>
+          {orders === undefined ? (
+            <ActivityIndicator size="small" color={Colors.primary} style={{ paddingVertical: 16 }} />
+          ) : recentOrders.length === 0 ? (
+            <View style={styles.productsEmpty}>
+              <MaterialIcons name="receipt-long" size={32} color={Colors.textMuted} />
+              <Text style={styles.productsEmptyText}>No orders yet. Your recent orders will appear here.</Text>
+            </View>
+          ) : (
+            recentOrders.map((order) => {
+              const status = ORDER_STATUS[order.status] || ORDER_STATUS.pending;
+              const firstItem = order.items[0];
+              return (
+                <View key={order._id} style={styles.orderCard}>
+                  <View style={styles.orderCardLeft}>
+                    <Text style={styles.orderEmoji}>📦</Text>
+                    <View style={styles.orderInfo}>
+                      <Text style={styles.orderItem} numberOfLines={1}>
+                        {firstItem ? `${firstItem.name} x ${firstItem.quantity}` : order.number}
+                      </Text>
+                      <Text style={styles.orderTotal}>{formatPrice(order.total)}</Text>
+                    </View>
+                  </View>
+                  <View style={styles.orderCardRight}>
+                    <View style={[styles.orderStatusBadge, { backgroundColor: status.color + '15' }]}>
+                      <MaterialIcons name={status.icon as any} size={11} color={status.color} />
+                      <Text style={[styles.orderStatusText, { color: status.color }]}>{status.label}</Text>
+                    </View>
+                    <Text style={styles.orderDate}>{order.storeName}</Text>
                   </View>
                 </View>
-                <View style={styles.orderCardRight}>
-                  <View style={[styles.orderStatusBadge, { backgroundColor: status.color + '15' }]}>
-                    <MaterialIcons name={status.icon as any} size={11} color={status.color} />
-                    <Text style={[styles.orderStatusText, { color: status.color }]}>{status.label}</Text>
-                  </View>
-                  <Text style={styles.orderDate}>{order.date}</Text>
-                </View>
-              </View>
-            );
-          })}
+              );
+            })
+          )}
         </View>
 
         {/* ─── Quick Actions ─── */}
@@ -419,6 +464,17 @@ const styles = StyleSheet.create({
     gap: 12,
     paddingRight: 16,
   },
+  productsEmpty: {
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 24,
+  },
+  productsEmptyText: {
+    fontSize: 13,
+    color: Colors.textLight,
+    textAlign: 'center',
+    paddingHorizontal: 24,
+  },
   productCard: {
     width: 140,
     backgroundColor: Colors.card,
@@ -463,6 +519,7 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '600',
     color: Colors.textMedium,
+    flex: 1,
   },
 
   /* ─── Orders ─── */

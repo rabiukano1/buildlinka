@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { PRODUCTS } from '../../constants/MockData';
+import { useQuery } from 'convex/react';
+import { api } from '../../convex/_generated/api';
 import CategoryShell, { EmptyResult, Footnote, Label, OrderLine, Result, Row, Stepper, Wrap, numeric } from '../../components/CategoryShell';
 import { Chip, Field } from '../../components/EngineerUI';
 import { paint } from '../../lib/estimators';
@@ -25,7 +26,8 @@ export default function PaintScreen() {
   const one = paint(parseFloat(length), parseFloat(width), parseFloat(height), doors, windows, coats, ceiling, finish.rate);
   const litres = one ? one.litres * rooms : 0;
   const buckets = Math.ceil(litres / 20);
-  const product = PRODUCTS.find((p) => p.category === 'Paint' && p.name.toLowerCase().includes(finishId));
+  const paintProducts = useQuery(api.products.list, { category: 'Paint' }) ?? [];
+  const product = paintProducts.find((p) => p.name.toLowerCase().includes(finishId));
 
   return (
     <CategoryShell

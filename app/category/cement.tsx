@@ -1,10 +1,11 @@
 import { useMemo, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Alert } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Alert, ActivityIndicator } from 'react-native';
 import { useRouter } from 'expo-router';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useQuery } from 'convex/react';
+import { api } from '../../convex/_generated/api';
 import { Colors } from '../../constants/Colors';
-import { PRODUCTS } from '../../constants/MockData';
 import { useCart } from '../../contexts/CartContext';
 import { useSaved } from '../../contexts/SavedItemsContext';
 import ProductCard from '../../components/ProductCard';
@@ -43,8 +44,9 @@ export default function CementCategoryScreen() {
   const { addItem } = useCart();
   const { isSaved, toggleSave } = useSaved();
 
-  const cementProducts = useMemo(() => PRODUCTS.filter((p) => p.category === 'Cement').sort((a, b) => a.price - b.price), []);
-  const cheapestId = cementProducts.find((p) => p.inStock)?.id;
+  const rows = useQuery(api.products.list, { category: 'Cement' });
+  const cementProducts = useMemo(() => [...(rows ?? [])].sort((a, b) => a.price - b.price), [rows]);
+  const cheapestId = cementProducts.find((p) => p.stock > 0)?._id;
 
   const [jobId, setJobId] = useState<JobId>('slab');
   const [mixId, setMixId] = useState<'m15' | 'm20'>('m15');
@@ -52,11 +54,11 @@ export default function CementCategoryScreen() {
   const [width, setWidth] = useState('');
   const [thickness, setThickness] = useState<number>(100);
   const [waste, setWaste] = useState(5);
-  const [productId, setProductId] = useState(cheapestId ?? cementProducts[0]?.id);
+  const [productId, setProductId] = useState<string | null>(null);
   const [openTip, setOpenTip] = useState<number | null>(0);
 
   const job = JOBS.find((j) => j.id === jobId)!;
-  const product = cementProducts.find((p) => p.id === productId);
+  const product = cementProducts.find((p) => p._id === productId) ?? cementProducts[0];
   const mix = jobId === 'slab' ? MIXES[mixId] : MIXES[jobId];
   const estimate = estimateCement(parseFloat(length), parseFloat(width), thickness, mix, waste);
 
@@ -80,24 +82,25 @@ export default function CementCategoryScreen() {
         <CategoryHeader title='Cement Supply' emoji='🏗️' heroTitle='Order the right number of bags' heroSub='Estimate cement, sand and gravel for your job, compare brands, then order.' trust={[['verified', 'Genuine 50 kg'], ['local-shipping', 'Site delivery'], ['savings', 'Best price']]} />
 
         <Text style={styles.sectionTitle}>Compare brands</Text>
+        {rows === undefined && <ActivityIndicator size="large" color={Colors.primary} />}
         {cementProducts.map((p) => {
-          const active = p.id === productId;
+          const active = p._id === product?._id;
           return (
-            <TouchableOpacity key={p.id} style={[styles.brandCard, active && styles.brandCardActive]} onPress={() => setProductId(p.id)} activeOpacity={0.8} accessibilityState={{ selected: active }}>
+            <TouchableOpacity key={p._id} style={[styles.brandCard, active && styles.brandCardActive]} onPress={() => setProductId(p._id)} activeOpacity={0.8} accessibilityState={{ selected: active }}>
               <View style={styles.brandLogo}>
                 <Text style={styles.brandInitial}>{brandOf(p.name)[0]}</Text>
               </View>
               <View style={styles.flex}>
                 <View style={styles.brandNameRow}>
                   <Text style={styles.brandName}>{brandOf(p.name)}</Text>
-                  {p.id === cheapestId && cementProducts.length > 1 && (
+                  {p._id === cheapestId && cementProducts.length > 1 && (
                     <View style={styles.cheapest}>
                       <Text style={styles.cheapestText}>Lowest price</Text>
                     </View>
                   )}
                 </View>
                 <Text style={styles.brandSub} numberOfLines={1}>{p.name.replace(brandOf(p.name) + ' ', '')}</Text>
-                <Text style={styles.brandMeta}>★ {p.rating} ({p.reviewCount}) · {p.vendor}</Text>
+                <Text style={styles.brandMeta}>{p.storeName}{p.storeVerified ? ' · Verified' : ''}</Text>
               </View>
               <View style={styles.brandRight}>
                 <Text style={styles.brandPrice}>{formatPrice(p.price)}</Text>
@@ -177,9 +180,9 @@ export default function CementCategoryScreen() {
                     <Text style={styles.costLabel}>{brandOf(product.name)} at {formatPrice(product.price)}/bag</Text>
                     <Text style={styles.cost}>{formatPrice(product.price * estimate.bags)}</Text>
                   </View>
-                  <TouchableOpacity style={[styles.cta, !product.inStock && styles.ctaOff]} onPress={addEstimate} disabled={!product.inStock} activeOpacity={0.8}>
+                  <TouchableOpacity style={[styles.cta, product.stock <= 0 && styles.ctaOff]} onPress={addEstimate} disabled={product.stock <= 0} activeOpacity={0.8}>
                     <MaterialIcons name="add-shopping-cart" size={20} color={Colors.onSecondary} />
-                    <Text style={styles.ctaText}>{product.inStock ? `Add ${estimate.bags} bags to cart` : 'Out of stock'}</Text>
+                    <Text style={styles.ctaText}>{product.stock > 0 ? `Add ${estimate.bags} bags to cart` : 'Out of stock'}</Text>
                   </TouchableOpacity>
                 </>
               )}
@@ -213,13 +216,13 @@ export default function CementCategoryScreen() {
         <Text style={[styles.sectionTitle, styles.sectionGap]}>All cement</Text>
         {cementProducts.map((p) => (
           <ProductCard
-            key={p.id}
+            key={p._id}
             product={p}
             horizontal
-            onPress={() => router.push(`/product/${p.id}`)}
+            onPress={() => router.push(`/product/${p._id}`)}
             onAddToCart={() => addItem(p)}
             onToggleSave={() => toggleSave(p)}
-            isSaved={isSaved(p.id)}
+            isSaved={isSaved(p._id)}
           />
         ))}
 

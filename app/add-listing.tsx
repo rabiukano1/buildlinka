@@ -4,16 +4,21 @@ import { Stack, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useMutation } from 'convex/react';
+import { api } from '../convex/_generated/api';
+import type { Id } from '../convex/_generated/dataModel';
 import KeyboardAwareWrapper from '../components/KeyboardAwareWrapper';
 import { Colors } from '../constants/Colors';
 import { usePermissions } from '../hooks/usePermissions';
+import { errorMessage, goBackOrHome, uploadPhoto } from '../lib/backend';
 
 const MAX_IMAGES = 6;
 const MAX_TITLE = 80;
 const MAX_DESC = 500;
 const PLATFORM_FEE = 0.1;
 
-const CATEGORIES = ['Cement', 'Steel & Iron', 'Roofing', 'Electrical', 'Plumbing', 'Tiles', 'Timber', 'Glass', 'Paint', 'Blocks', 'Equipment'];
+// Same values as the backend CATEGORIES list (convex/products.ts).
+const CATEGORIES = ['Cement', 'Steel & Iron', 'Roofing', 'Electrical', 'Plumbing', 'Tiles', 'Timber', 'Equipment', 'Glass', 'Paint', 'Blocks'];
 const UNITS = ['piece', 'bag', 'box', 'sheet', 'bucket', 'block', 'meter', 'litre', 'kg', 'pack'];
 
 const naira = (n: number) => `₦${n.toLocaleString('en-NG')}`;
@@ -49,6 +54,8 @@ export default function AddListingScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { ensure } = usePermissions();
+  const createProduct = useMutation(api.products.create);
+  const generateUploadUrl = useMutation(api.files.generateUploadUrl);
   const [images, setImages] = useState<string[]>([]);
   const [title, setTitle] = useState('');
   const [category, setCategory] = useState('');
@@ -56,22 +63,24 @@ export default function AddListingScreen() {
   const [price, setPrice] = useState('');
   const [quantity, setQuantity] = useState('');
   const [unit, setUnit] = useState('');
+  const [status, setStatus] = useState<'active' | 'draft'>('active');
   const [focused, setFocused] = useState<string | null>(null);
   const [showErrors, setShowErrors] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   const priceNum = Number(price) || 0;
   const qtyNum = Number(quantity) || 0;
 
   const errors = useMemo(() => {
     const e: Record<string, string> = {};
-    if (!images.length) e.photos = 'Add at least one photo';
+    if (status === 'active' && !images.length) e.photos = 'Add at least one photo';
     if (!title.trim()) e.title = 'Title is required';
     if (!category) e.category = 'Pick a category';
     if (priceNum <= 0) e.price = 'Enter a price';
     if (qtyNum <= 0) e.quantity = 'Enter stock quantity';
     if (!unit) e.unit = 'Pick a unit';
     return e;
-  }, [images.length, title, category, priceNum, qtyNum, unit]);
+  }, [images.length, title, category, priceNum, qtyNum, unit, status]);
 
   const missing = Object.keys(errors).length;
   const progress = (6 - missing) / 6;
@@ -90,17 +99,40 @@ export default function AddListingScreen() {
   const removeImage = (idx: number) => setImages((prev) => prev.filter((_, i) => i !== idx));
   const stepQty = (d: number) => setQuantity(String(Math.max(0, qtyNum + d)));
 
-  const handlePublish = () => {
+  const handlePublish = async () => {
     if (missing) {
       setShowErrors(true);
       Alert.alert('Almost there', `Complete these first:\n• ${Object.values(errors).join('\n• ')}`);
       return;
     }
-    Alert.alert(
-      'Listing submitted',
-      "Your listing is pending review. We'll notify you once it's live.",
-      [{ text: 'OK', onPress: () => router.back() }]
-    );
+    if (saving) return;
+    setSaving(true);
+    try {
+      const photos: Id<'_storage'>[] = [];
+      for (const uri of images) {
+        const uploadUrl = await generateUploadUrl({});
+        photos.push((await uploadPhoto(uploadUrl, uri)) as Id<'_storage'>);
+      }
+      await createProduct({
+        name: title.trim(),
+        category,
+        description: description.trim() || undefined,
+        unit,
+        price: priceNum,
+        stock: qtyNum,
+        photos,
+        status,
+      });
+      Alert.alert(
+        status === 'draft' ? 'Draft saved' : 'Listing published',
+        status === 'draft' ? 'Your draft is saved. Publish it from My Store when ready.' : "Your listing is live. Buyers can find it in materials.",
+        [{ text: 'OK', onPress: () => goBackOrHome() }]
+      );
+    } catch (e) {
+      Alert.alert('Could not save listing', errorMessage(e));
+    } finally {
+      setSaving(false);
+    }
   };
 
   const inputStyle = (key: string) => [styles.input, focused === key && styles.inputFocused, err(key) && styles.inputError];
@@ -112,8 +144,8 @@ export default function AddListingScreen() {
         <Text style={styles.footerCount}>{missing ? `${missing} left` : 'Ready'}</Text>
         <Text style={styles.footerSub}>{missing ? 'to complete' : 'to publish'}</Text>
       </View>
-      <TouchableOpacity style={[styles.publishBtn, !!missing && styles.publishBtnIdle]} onPress={handlePublish} activeOpacity={0.8}>
-        <Text style={styles.publishText}>Publish listing</Text>
+      <TouchableOpacity style={[styles.publishBtn, (!!missing || saving) && styles.publishBtnIdle]} onPress={handlePublish} activeOpacity={0.8} disabled={saving}>
+        <Text style={styles.publishText}>{saving ? 'Saving…' : status === 'draft' ? 'Save draft' : 'Publish listing'}</Text>
         <Ionicons name="arrow-forward" size={18} color="#fff" />
       </TouchableOpacity>
     </View>
@@ -264,6 +296,10 @@ export default function AddListingScreen() {
         )}
 
         <Text style={styles.terms}>By publishing, you agree to BuildLinka's Terms of Service and Listing Policies.</Text>
+
+        <Section title="Visibility" hint="Drafts are only visible to you in My Store.">
+          <Chips options={['active', 'draft']} value={status} onSelect={(v) => setStatus(v as 'active' | 'draft')} />
+        </Section>
       </KeyboardAwareWrapper>
 
     </View>

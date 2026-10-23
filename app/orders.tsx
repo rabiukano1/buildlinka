@@ -1,29 +1,15 @@
 import { useState } from 'react';
-import { View, Text, FlatList, StyleSheet, TouchableOpacity } from 'react-native';
+import { View, Text, FlatList, StyleSheet, TouchableOpacity, ActivityIndicator, Alert } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
 import { MaterialIcons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useMutation, useQuery } from 'convex/react';
+import { api } from '../convex/_generated/api';
+import type { Id } from '../convex/_generated/dataModel';
 import { Colors } from '../constants/Colors';
+import { errorMessage, formatPrice } from '../lib/backend';
 
 type OrderStatus = 'pending' | 'confirmed' | 'shipped' | 'delivered' | 'cancelled';
-
-type OrderItem = {
-  id: string;
-  emoji: string;
-  name: string;
-  qty: number;
-  price: number;
-};
-
-type Order = {
-  id: string;
-  date: string;
-  status: OrderStatus;
-  items: OrderItem[];
-  total: number;
-  vendor: string;
-};
 
 const STATUS_CONFIG: Record<OrderStatus, { label: string; color: string; icon: string }> = {
   pending: { label: 'Pending', color: Colors.amber, icon: 'schedule' },
@@ -33,65 +19,39 @@ const STATUS_CONFIG: Record<OrderStatus, { label: string; color: string; icon: s
   cancelled: { label: 'Cancelled', color: Colors.error, icon: 'cancel' },
 };
 
-const ORDERS: Order[] = [
-  {
-    id: 'ORD-2024-001',
-    date: '15 May 2026',
-    status: 'delivered',
-    vendor: 'Lagos Building Supplies',
-    total: 17000,
-    items: [
-      { id: 'p1', emoji: '🏗️', name: 'Dangote Cement 42.5R (50kg)', qty: 2, price: 8500 },
-    ],
-  },
-  {
-    id: 'ORD-2024-002',
-    date: '22 May 2026',
-    status: 'shipped',
-    vendor: 'RoofPro Nigeria',
-    total: 4200,
-    items: [
-      { id: 'p3', emoji: '🏠', name: 'Aluminum Roofing Sheet (0.5mm)', qty: 1, price: 4200 },
-    ],
-  },
-  {
-    id: 'ORD-2024-003',
-    date: '1 Jun 2026',
-    status: 'pending',
-    vendor: 'TileWorld Nigeria',
-    total: 3500,
-    items: [
-      { id: 'p5', emoji: '🏛️', name: 'Ceramic Floor Tiles 60x60cm', qty: 1, price: 3500 },
-    ],
-  },
-  {
-    id: 'ORD-2024-004',
-    date: '5 Jun 2026',
-    status: 'confirmed',
-    vendor: 'Steel Masters Ltd',
-    total: 13600,
-    items: [
-      { id: 'p4', emoji: '⚙️', name: 'Iron Rod 12mm (6m)', qty: 2, price: 6800 },
-    ],
-  },
-];
-
 const TABS = ['All', 'Active', 'Completed', 'Cancelled'];
-
-const formatPrice = (price: number) => '₦' + price.toLocaleString('en-NG');
 
 export default function OrdersScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const [activeTab, setActiveTab] = useState('All');
+  const orders = useQuery(api.orders.mine);
+  const cancelOrder = useMutation(api.orders.cancelMine);
 
-  const filteredOrders = ORDERS.filter((o) => {
+  const filteredOrders = (orders ?? []).filter((o) => {
     if (activeTab === 'All') return true;
     if (activeTab === 'Active') return o.status === 'pending' || o.status === 'confirmed' || o.status === 'shipped';
     if (activeTab === 'Completed') return o.status === 'delivered';
     if (activeTab === 'Cancelled') return o.status === 'cancelled';
     return true;
   });
+
+  const handleCancel = (id: string, number: string) => {
+    Alert.alert('Cancel order', `Cancel order ${number}? The store hasn't confirmed it yet.`, [
+      { text: 'Keep order', style: 'cancel' },
+      {
+        text: 'Cancel order',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await cancelOrder({ id: id as Id<'orders'> });
+          } catch (e) {
+            Alert.alert('Could not cancel', errorMessage(e));
+          }
+        },
+      },
+    ]);
+  };
 
   return (
     <View style={styles.container}>
@@ -107,54 +67,82 @@ export default function OrdersScreen() {
           </TouchableOpacity>
         ))}
       </View>
-      <FlatList
-        data={filteredOrders}
-        keyExtractor={(item) => item.id}
-        contentContainerStyle={styles.list}
-        showsVerticalScrollIndicator={false}
-        renderItem={({ item: order }) => {
-          const statusCfg = STATUS_CONFIG[order.status];
-          return (
-            <TouchableOpacity style={styles.orderCard} activeOpacity={0.85}>
-              <View style={styles.orderHeader}>
-                <View style={styles.orderIdRow}>
-                  <Text style={styles.orderId}>{order.id}</Text>
-                  <View style={[styles.statusBadge, { backgroundColor: statusCfg.color + '18' }]}>
-                    <MaterialIcons name={statusCfg.icon as any} size={12} color={statusCfg.color} />
-                    <Text style={[styles.statusText, { color: statusCfg.color }]}>{statusCfg.label}</Text>
-                  </View>
-                </View>
-                <Text style={styles.orderDate}>{order.date}</Text>
-              </View>
-              <View style={styles.orderItems}>
-                {order.items.map((item) => (
-                  <View key={item.id} style={styles.orderItem}>
-                    <Text style={styles.itemEmoji}>{item.emoji}</Text>
-                    <View style={styles.itemInfo}>
-                      <Text style={styles.itemName} numberOfLines={1}>{item.name}</Text>
-                      <Text style={styles.itemMeta}>{item.qty} × {formatPrice(item.price)}</Text>
+      {orders === undefined ? (
+        <View style={styles.loading}>
+          <ActivityIndicator size="large" color={Colors.primary} />
+          <Text style={styles.emptySub}>Loading your orders…</Text>
+        </View>
+      ) : (
+        <FlatList
+          data={filteredOrders}
+          keyExtractor={(item) => item._id}
+          contentContainerStyle={styles.list}
+          showsVerticalScrollIndicator={false}
+          renderItem={({ item: order }) => {
+            const statusCfg = STATUS_CONFIG[order.status as OrderStatus] ?? STATUS_CONFIG.pending;
+            return (
+              <TouchableOpacity
+                style={styles.orderCard}
+                activeOpacity={0.85}
+                onPress={() => router.push(`/order-tracking?orderId=${order._id}&code=${order.trackingCode ?? ''}` as any)}
+              >
+                <View style={styles.orderHeader}>
+                  <View style={styles.orderIdRow}>
+                    <Text style={styles.orderId}>{order.number}</Text>
+                    <View style={[styles.statusBadge, { backgroundColor: statusCfg.color + '18' }]}>
+                      <MaterialIcons name={statusCfg.icon as any} size={12} color={statusCfg.color} />
+                      <Text style={[styles.statusText, { color: statusCfg.color }]}>{statusCfg.label}</Text>
                     </View>
                   </View>
-                ))}
-              </View>
-              <View style={styles.orderFooter}>
-                <View>
-                  <Text style={styles.vendorLabel}>{order.vendor}</Text>
-                  <Text style={styles.totalLabel}>Total: <Text style={styles.totalValue}>{formatPrice(order.total)}</Text></Text>
+                  <Text style={styles.orderDate}>{new Date(order._creationTime).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</Text>
                 </View>
-                <MaterialIcons name="chevron-right" size={22} color={Colors.textLight} />
-              </View>
-            </TouchableOpacity>
-          );
-        }}
-        ListEmptyComponent={
-          <View style={styles.empty}>
-            <MaterialIcons name="receipt-long" size={64} color={Colors.border} />
-            <Text style={styles.emptyTitle}>No orders found</Text>
-            <Text style={styles.emptySub}>Your orders will appear here</Text>
-          </View>
-        }
-      />
+                <View style={styles.orderItems}>
+                  {order.items.map((item) => (
+                    <View key={item.productId} style={styles.orderItem}>
+                      <Text style={styles.itemEmoji}>📦</Text>
+                      <View style={styles.itemInfo}>
+                        <Text style={styles.itemName} numberOfLines={1}>{item.name}</Text>
+                        <Text style={styles.itemMeta}>{item.quantity} × {formatPrice(item.price)}</Text>
+                      </View>
+                    </View>
+                  ))}
+                </View>
+                <View style={styles.orderFooter}>
+                  <View>
+                    <Text style={styles.vendorLabel}>{order.storeName}</Text>
+                    <Text style={styles.totalLabel}>Total: <Text style={styles.totalValue}>{formatPrice(order.total)}</Text></Text>
+                  </View>
+                  {order.status === 'pending' ? (
+                    <TouchableOpacity
+                      style={styles.cancelBtn}
+                      onPress={() => handleCancel(order._id, order.number)}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={styles.cancelText}>Cancel</Text>
+                    </TouchableOpacity>
+                  ) : (
+                    <MaterialIcons name="chevron-right" size={22} color={Colors.textLight} />
+                  )}
+                </View>
+              </TouchableOpacity>
+            );
+          }}
+          ListEmptyComponent={
+            <View style={styles.empty}>
+              <MaterialIcons name="receipt-long" size={64} color={Colors.border} />
+              <Text style={styles.emptyTitle}>No orders found</Text>
+              <Text style={styles.emptySub}>
+                {orders.length === 0 ? 'Your orders will appear here after checkout' : 'No orders match this filter'}
+              </Text>
+              {orders.length === 0 && (
+                <TouchableOpacity style={styles.browseBtn} onPress={() => router.push('/(tabs)/materials' as any)}>
+                  <Text style={styles.browseText}>Browse materials</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          }
+        />
+      )}
     </View>
   );
 }
@@ -189,6 +177,12 @@ const styles = StyleSheet.create({
   },
   tabTextActive: {
     color: '#fff',
+  },
+  loading: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 12,
   },
   list: {
     padding: 16,
@@ -288,6 +282,18 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: Colors.primaryGreen,
   },
+  cancelBtn: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 99,
+    borderWidth: 1,
+    borderColor: Colors.error,
+  },
+  cancelText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: Colors.error,
+  },
   empty: {
     alignItems: 'center',
     justifyContent: 'center',
@@ -302,5 +308,17 @@ const styles = StyleSheet.create({
   emptySub: {
     fontSize: 13,
     color: Colors.textLight,
+  },
+  browseBtn: {
+    marginTop: 12,
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 99,
+    backgroundColor: Colors.primary,
+  },
+  browseText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#fff',
   },
 });

@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState, useEffect } from 'react';
+import { useCallback, useRef, useState, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -8,20 +8,16 @@ import {
   RefreshControl,
   Animated,
   Dimensions,
+  ActivityIndicator,
+  Image,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { MaterialIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
+import { useQuery } from 'convex/react';
+import { api } from '../../convex/_generated/api';
 import { Colors } from '../../constants/Colors';
-import {
-  CATEGORIES,
-  PRODUCTS,
-  WORKERS,
-  VENDORS,
-  type Product,
-  type Worker,
-  type Vendor,
-} from '../../constants/MockData';
+import { type BackendProduct } from '../../lib/backend';
 import KeyboardAwareWrapper from '../../components/KeyboardAwareWrapper';
 import { useCart } from '../../contexts/CartContext';
 import { useSaved } from '../../contexts/SavedItemsContext';
@@ -33,6 +29,32 @@ import FeaturedBanner from '../../components/FeaturedBanner';
 const { width } = Dimensions.get('window');
 
 const VISIBLE_CATEGORIES = 8;
+
+const CATEGORY_NAMES = ['Cement', 'Steel & Iron', 'Roofing', 'Electrical', 'Plumbing', 'Tiles', 'Timber', 'Equipment', 'Glass', 'Paint', 'Blocks'];
+
+// Presentation-only icon/color map so CategoryCard keeps its existing look.
+// Counts are intentionally dropped (no counts shown).
+const CATEGORY_META: Record<string, { icon: string; color: string }> = {
+  'Cement': { icon: 'layers', color: '#0d631b' },
+  'Steel & Iron': { icon: 'build', color: '#707a6c' },
+  'Roofing': { icon: 'home', color: '#a83900' },
+  'Electrical': { icon: 'flash-on', color: '#6d5100' },
+  'Plumbing': { icon: 'water', color: '#0d631b' },
+  'Tiles': { icon: 'grid-on', color: '#707a6c' },
+  'Timber': { icon: 'forest', color: '#6d5100' },
+  'Equipment': { icon: 'precision-manufacturing', color: '#0d631b' },
+  'Glass': { icon: 'window', color: '#707a6c' },
+  'Paint': { icon: 'color-lens', color: '#a83900' },
+  'Blocks': { icon: 'view-module', color: '#6d5100' },
+};
+
+const HOME_CATEGORIES = CATEGORY_NAMES.map((name, i) => ({
+  id: String(i + 1),
+  name,
+  icon: CATEGORY_META[name]?.icon ?? 'category',
+  color: CATEGORY_META[name]?.color ?? Colors.primary,
+  count: 0,
+}));
 
 function FadeInSection({ children, delay = 0 }: { children: React.ReactNode; delay?: number }) {
   const opacity = useRef(new Animated.Value(0)).current;
@@ -69,37 +91,64 @@ function SectionHeader({ title, action, onAction }: { title: string; action?: st
   );
 }
 
-function MiniVendorCard({ vendor }: { vendor: Vendor }) {
-  return (
-    <TouchableOpacity style={styles.miniVendor} activeOpacity={0.7}>
-      <View style={styles.miniVendorEmojiBox}>
-        <Text style={styles.miniVendorEmoji}>{vendor.emoji}</Text>
-      </View>
-      <Text style={styles.miniVendorName} numberOfLines={1}>{vendor.name}</Text>
-      <View style={styles.miniVendorRating}>
-        <MaterialIcons name="star" size={10} color={Colors.amber} />
-        <Text style={styles.miniVendorRatingText}>{vendor.rating}</Text>
-      </View>
-    </TouchableOpacity>
-  );
-}
+type StoreRow = {
+  _id: string;
+  name: string;
+  location: string;
+  verified: boolean;
+  productCount: number;
+};
 
-function WorkerMiniCard({ worker }: { worker: Worker }) {
+type WorkerRow = {
+  _id: string;
+  name: string;
+  trade: string;
+  location: string;
+  rating: number;
+  reviewCount: number;
+  hourlyRate: number;
+  available: boolean;
+  photoUrl: string | null;
+};
+
+function MiniWorkerCard({ worker, onPress }: { worker: WorkerRow; onPress: () => void }) {
   return (
-    <TouchableOpacity style={styles.workerMini} activeOpacity={0.8}>
+    <TouchableOpacity style={styles.workerMini} activeOpacity={0.7} onPress={onPress}>
       <View style={[styles.workerMiniAvatar, !worker.available && styles.workerMiniAvatarBusy]}>
-        <Text style={styles.workerMiniEmoji}>{worker.avatar}</Text>
+        {worker.photoUrl ? (
+          <Image source={{ uri: worker.photoUrl }} style={styles.workerMiniPhoto} />
+        ) : (
+          <Text style={styles.workerMiniEmoji}>{worker.name.charAt(0).toUpperCase()}</Text>
+        )}
         <View style={[styles.workerMiniDot, worker.available ? styles.wDotGreen : styles.wDotRed]} />
       </View>
       <Text style={styles.workerMiniName} numberOfLines={1}>{worker.name}</Text>
       <Text style={styles.workerMiniTrade} numberOfLines={1}>{worker.trade}</Text>
       <View style={styles.workerMiniRateRow}>
-        <Text style={styles.workerMiniRate}>₦{(worker.dailyRate / 1000).toFixed(0)}k</Text>
-        <Text style={styles.workerMiniRateLabel}>/day</Text>
+        <Text style={styles.workerMiniRate}>{'₦' + Math.round(worker.hourlyRate).toLocaleString('en-NG')}</Text>
+        <Text style={styles.workerMiniRateLabel}>/hr</Text>
       </View>
-      <TouchableOpacity style={styles.workerMiniHire} activeOpacity={0.7}>
+      <View style={styles.workerMiniHire}>
         <Text style={styles.workerMiniHireText}>{worker.available ? 'Hire' : 'Busy'}</Text>
-      </TouchableOpacity>
+      </View>
+    </TouchableOpacity>
+  );
+}
+
+function MiniVendorCard({ store }: { store: StoreRow }) {
+  return (
+    <TouchableOpacity style={styles.miniVendor} activeOpacity={0.7}>
+      <View style={styles.miniVendorEmojiBox}>
+        <MaterialIcons name="store" size={22} color={Colors.primary} />
+      </View>
+      <Text style={styles.miniVendorName} numberOfLines={1}>{store.name}</Text>
+      <Text style={styles.miniVendorLocation} numberOfLines={1}>{store.location}</Text>
+      <View style={styles.miniVendorRating}>
+        {store.verified && <MaterialIcons name="verified" size={12} color={Colors.primaryGreen} />}
+        <Text style={styles.miniVendorRatingText}>
+          {store.productCount} item{store.productCount !== 1 ? 's' : ''}
+        </Text>
+      </View>
     </TouchableOpacity>
   );
 }
@@ -117,13 +166,19 @@ export default function HomeScreen() {
     setTimeout(() => setRefreshing(false), 1200);
   }, []);
 
-  const handleProductPress = (product: Product) => {
-    router.push(`/product/${product.id}`);
+  const handleProductPress = (product: BackendProduct) => {
+    router.push(`/product/${product._id}`);
   };
 
-  const featuredProducts = PRODUCTS.filter((p) => p.badge);
-  const displayedCategories = showAllCats ? CATEGORIES : CATEGORIES.slice(0, VISIBLE_CATEGORIES);
-  const nearbyWorkers = WORKERS.filter((w) => w.location.includes('Lagos'));
+  const products = useQuery(api.products.list, {});
+  const stores = useQuery(api.stores.list, { limit: 8 });
+  const workers = useQuery(api.workers.list, { availableOnly: true, limit: 8 });
+  // Newest first for "Today's Best Deals".
+  const deals = useMemo(
+    () => [...(products ?? [])].sort((a, b) => b.createdAt - a.createdAt),
+    [products]
+  );
+  const displayedCategories = showAllCats ? HOME_CATEGORIES : HOME_CATEGORIES.slice(0, VISIBLE_CATEGORIES);
 
   return (
     <View style={styles.wrapper}>
@@ -229,7 +284,7 @@ export default function HomeScreen() {
         {/* ─── Categories ─── */}
         <FadeInSection delay={320}>
           <View style={styles.section}>
-            <SectionHeader title="Categories" action={showAllCats ? 'Show Less' : `+${CATEGORIES.length - VISIBLE_CATEGORIES} More`} />
+            <SectionHeader title="Categories" action={showAllCats ? 'Show Less' : `+${HOME_CATEGORIES.length - VISIBLE_CATEGORIES} More`} />
             <View style={styles.categoryGrid}>
               {displayedCategories.map((cat) => (
                 <CategoryCard
@@ -262,7 +317,7 @@ export default function HomeScreen() {
               onPress={() => setShowAllCats(!showAllCats)}
             >
               <Text style={styles.categoryToggleText}>
-                {showAllCats ? 'Show Less Categories' : `View All ${CATEGORIES.length} Categories`}
+                {showAllCats ? 'Show Less Categories' : `View All ${HOME_CATEGORIES.length} Categories`}
               </Text>
               <MaterialIcons
                 name={showAllCats ? 'expand-less' : 'expand-more'}
@@ -283,7 +338,14 @@ export default function HomeScreen() {
         {/* ─── Today's Best Deals ─── */}
         <FadeInSection delay={480}>
           <View style={styles.section}>
-            <SectionHeader title="Today's Best Deals" action="View All" />
+            <SectionHeader title="Today's Best Deals" action="View All" onAction={() => router.push('/(tabs)/materials' as any)} />
+            {products === undefined ? (
+              <View style={styles.loaderBox}>
+                <ActivityIndicator size="large" color={Colors.primaryGreen} />
+              </View>
+            ) : deals.length === 0 ? (
+              <Text style={styles.emptyText}>No deals yet. Check back soon.</Text>
+            ) : (
             <ScrollView
               horizontal
               showsHorizontalScrollIndicator={false}
@@ -291,17 +353,18 @@ export default function HomeScreen() {
               decelerationRate="fast"
               snapToInterval={172}
             >
-              {featuredProducts.map((p) => (
+              {deals.map((p) => (
                 <ProductCard
-                  key={p.id}
+                  key={p._id}
                   product={p}
                   onPress={() => handleProductPress(p)}
                   onAddToCart={() => addItem(p)}
                   onToggleSave={() => toggleSave(p)}
-                  isSaved={isSaved(p.id)}
+                  isSaved={isSaved(p._id)}
                 />
               ))}
             </ScrollView>
+            )}
           </View>
         </FadeInSection>
 
@@ -309,33 +372,66 @@ export default function HomeScreen() {
         <FadeInSection delay={560}>
           <View style={styles.section}>
             <SectionHeader title="Popular Vendors" action="View All" onAction={() => router.push('/popular-vendors' as any)} />
+            {stores === undefined ? (
+              <View style={styles.loaderBox}>
+                <ActivityIndicator size="large" color={Colors.primaryGreen} />
+              </View>
+            ) : stores.length === 0 ? (
+              <Text style={styles.emptyText}>No vendors yet. Check back soon.</Text>
+            ) : (
             <ScrollView
               horizontal
               showsHorizontalScrollIndicator={false}
               contentContainerStyle={styles.miniVendorScroll}
             >
-              {VENDORS.map((v) => (
-                <MiniVendorCard key={v.id} vendor={v} />
+              {stores.map((s) => (
+                <MiniVendorCard key={s._id} store={s} />
               ))}
             </ScrollView>
+            )}
           </View>
         </FadeInSection>
 
         {/* ─── Workers Near You ─── */}
         <FadeInSection delay={640}>
           <View style={styles.section}>
-            <SectionHeader title="Workers Near You" action="View All" onAction={() => router.push('/nearby' as any)} />
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.workerScroll}
-              decelerationRate="fast"
-              snapToInterval={148}
-            >
-              {nearbyWorkers.map((w) => (
-                <WorkerMiniCard key={w.id} worker={w} />
-              ))}
-            </ScrollView>
+            <SectionHeader title="Workers Near You" action="View All" onAction={() => router.push('/workers-marketplace' as any)} />
+            {workers === undefined ? (
+              <View style={styles.loaderBox}>
+                <ActivityIndicator size="large" color={Colors.primaryGreen} />
+              </View>
+            ) : workers.length === 0 ? (
+              <View style={styles.workerEmpty}>
+                <View style={styles.workerEmptyIcon}>
+                  <MaterialIcons name="engineering" size={28} color={Colors.primary} />
+                </View>
+                <Text style={styles.workerEmptyTitle}>No workers available right now</Text>
+                <Text style={styles.workerEmptySub}>
+                  Browse the marketplace or offer your own skills to get hired.
+                </Text>
+                <TouchableOpacity
+                  style={styles.workerEmptyBtn}
+                  onPress={() => router.push('/workers-marketplace' as any)}
+                  activeOpacity={0.8}
+                >
+                  <Text style={styles.workerEmptyBtnText}>Explore Marketplace</Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.workerScroll}
+              >
+                {workers.map((w) => (
+                  <MiniWorkerCard
+                    key={w._id}
+                    worker={w}
+                    onPress={() => router.push('/workers-marketplace' as any)}
+                  />
+                ))}
+              </ScrollView>
+            )}
           </View>
         </FadeInSection>
 
@@ -721,6 +817,7 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.divider,
   },
   workerMiniEmoji: { fontSize: 26 },
+  workerMiniPhoto: { width: 52, height: 52 },
   workerMiniDot: {
     position: 'absolute',
     bottom: 1,
@@ -774,6 +871,72 @@ const styles = StyleSheet.create({
   },
 
   /* ─── Bottom ─── */
+  loaderBox: {
+    paddingVertical: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  emptyText: {
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    fontSize: 13.5,
+    color: Colors.textLight,
+    textAlign: 'center',
+  },
+  miniVendorLocation: {
+    fontSize: 10.5,
+    color: Colors.textMedium,
+    textAlign: 'center',
+  },
+  workerEmpty: {
+    marginHorizontal: 20,
+    backgroundColor: Colors.card,
+    borderRadius: 8,
+    padding: 20,
+    alignItems: 'center',
+    gap: 6,
+    borderLeftWidth: 3,
+    borderLeftColor: Colors.primary,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  workerEmptyIcon: {
+    width: 52,
+    height: 52,
+    borderRadius: 8,
+    backgroundColor: Colors.surfaceVariant,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 4,
+  },
+  workerEmptyTitle: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: Colors.textDark,
+    textAlign: 'center',
+  },
+  workerEmptySub: {
+    fontSize: 12.5,
+    color: Colors.textLight,
+    textAlign: 'center',
+    lineHeight: 17,
+  },
+  workerEmptyBtn: {
+    marginTop: 8,
+    backgroundColor: Colors.secondary,
+    borderRadius: 99,
+    paddingHorizontal: 22,
+    paddingVertical: 10,
+    alignItems: 'center',
+  },
+  workerEmptyBtnText: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: '700',
+  },
   bottomSpacer: {
     height: 24,
   },

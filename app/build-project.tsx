@@ -13,13 +13,32 @@ import {
   KeyboardAvoidingView,
   Platform,
   Keyboard,
+  Alert,
 } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
 import { MaterialIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useMutation, useQuery } from 'convex/react';
+import { api } from '../convex/_generated/api';
 import { Colors } from '../constants/Colors';
-import { CATEGORIES, TRADES } from '../constants/MockData';
+import { errorMessage, goBackOrHome } from '../lib/backend';
+
+// Local category names (was constants/MockData) — estimator UI only, no
+// product lookups. Icons/colors are presentation-only.
+const MATERIAL_CATEGORIES = [
+  { id: 'cement', name: 'Cement', icon: 'layers', color: '#0d631b' },
+  { id: 'steel', name: 'Steel & Iron', icon: 'build', color: '#707a6c' },
+  { id: 'roofing', name: 'Roofing', icon: 'home', color: '#a83900' },
+  { id: 'electrical', name: 'Electrical', icon: 'flash-on', color: '#6d5100' },
+  { id: 'plumbing', name: 'Plumbing', icon: 'water', color: '#0d631b' },
+  { id: 'tiles', name: 'Tiles', icon: 'grid-on', color: '#707a6c' },
+  { id: 'timber', name: 'Timber', icon: 'forest', color: '#6d5100' },
+  { id: 'paint', name: 'Paint', icon: 'color-lens', color: '#a83900' },
+];
+
+// Local trade names (was constants/MockData) — estimator UI only.
+const WORKER_TRADES = ['Mason', 'Electrician', 'Plumber', 'Carpenter', 'Painter', 'Welder', 'Tiler', 'Designer'];
 
 const { width, height } = Dimensions.get('window');
 const formatPrice = (price: number) => '₦' + price.toLocaleString('en-NG');
@@ -35,8 +54,8 @@ const BUDGET_RANGES = [
   { label: 'Luxury', range: '₦15M+', min: 15000000, max: 50000000 },
 ];
 
-const TRADE_WORKERS = TRADES.filter((t) => t !== 'All').map((t) => ({ trade: t, count: 1 }));
-const MATERIAL_PRESETS = CATEGORIES.slice(0, 8).map((c) => ({ id: c.id, name: c.name, icon: c.icon, color: c.color, selected: false, note: '' }));
+const TRADE_WORKERS = WORKER_TRADES.map((t) => ({ trade: t, count: 1 }));
+const MATERIAL_PRESETS = MATERIAL_CATEGORIES.map((c) => ({ id: c.id, name: c.name, icon: c.icon, color: c.color, selected: false, note: '' }));
 
 type AIChatMessage = {
   role: 'user' | 'ai';
@@ -418,6 +437,9 @@ export default function BuildProjectScreen() {
   const [materials, setMaterials] = useState(MATERIAL_PRESETS.map((m) => ({ ...m })));
   const [workers, setWorkers] = useState(TRADE_WORKERS.map((w) => ({ ...w })));
   const [submitted, setSubmitted] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const me = useQuery(api.users.me);
+  const createProject = useMutation(api.projects.create);
 
   const [showAI, setShowAI] = useState(false);
   const [chatMessages, setChatMessages] = useState<AIChatMessage[]>([]);
@@ -546,7 +568,37 @@ export default function BuildProjectScreen() {
     Animated.timing(aiAnim, { toValue: 0, duration: 200, useNativeDriver: true }).start(() => setShowAI(false));
   };
 
-  const handleSubmit = () => setSubmitted(true);
+  const handleSubmit = async () => {
+    if (!me) {
+      router.push('/sign-in' as any);
+      return;
+    }
+    if (!budgetObj || budgetObj.min <= 0) {
+      Alert.alert('Choose a budget', 'Go back to the budget step and pick a range.');
+      return;
+    }
+    setSubmitting(true);
+    try {
+      await createProject({
+        name: projectName.trim(),
+        client: me.name?.trim() || 'Self-managed build',
+        location: location.trim(),
+        budget: budgetObj.min,
+        deadline: duration,
+        description: description.trim() || undefined,
+        projectType,
+        projectSize,
+        paymentPlan,
+        materials: materials.filter((m) => m.selected).map((m) => ({ name: m.name, note: m.note.trim() || undefined })),
+        workersNeeded: selectedWorkers.map((w) => ({ trade: w.trade, count: w.count })),
+      });
+      setSubmitted(true);
+    } catch (err) {
+      Alert.alert('Could not submit project', errorMessage(err));
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   const renderStep = () => {
     switch (step) {
@@ -775,7 +827,7 @@ export default function BuildProjectScreen() {
               <Text style={styles.successMetaLabel}>Estimated Budget</Text>
               <Text style={[styles.successMetaValue, { color: '#4cdf8b' }]}>{budgetObj ? budgetObj.range : budget}</Text>
             </View>
-            <TouchableOpacity style={styles.successBtn} onPress={() => router.back()} activeOpacity={0.7}>
+            <TouchableOpacity style={styles.successBtn} onPress={() => goBackOrHome()} activeOpacity={0.7}>
               <Text style={styles.successBtnText}>Back to Dashboard</Text>
               <MaterialIcons name="arrow-forward" size={18} color={Colors.primary} />
             </TouchableOpacity>
@@ -792,7 +844,7 @@ export default function BuildProjectScreen() {
 
       <LinearGradient colors={[Colors.primary, '#063d0e']} style={[styles.headerWrap, { paddingTop: insets.top }]} start={{ x: 0, y: 0 }} end={{ x: 1.2, y: 1.2 }}>
         <View style={styles.headerRow}>
-          <TouchableOpacity style={styles.backBtn} onPress={() => router.back()} activeOpacity={0.7}>
+          <TouchableOpacity style={styles.backBtn} onPress={() => goBackOrHome()} activeOpacity={0.7}>
             <MaterialIcons name="arrow-back" size={20} color="#fff" />
           </TouchableOpacity>
           <View style={styles.headerTitleArea}>
@@ -834,9 +886,9 @@ export default function BuildProjectScreen() {
               <Text style={styles.backStepText}>Back</Text>
             </TouchableOpacity>
           )}
-          <TouchableOpacity style={[styles.nextBtn, !canProceed() && styles.nextBtnDisabled]} onPress={() => { if (step < 4) { setStep(step + 1); fadeAnim.setValue(0); scrollRef.current?.scrollTo({ y: 0, animated: true }); } else { handleSubmit(); } }} activeOpacity={0.7} disabled={!canProceed()}>
-            <Text style={styles.nextBtnText}>{step < 4 ? 'Continue' : 'Submit Project'}</Text>
-            <MaterialIcons name={step < 4 ? 'arrow-forward' : 'check'} size={18} color="#fff" />
+          <TouchableOpacity style={[styles.nextBtn, (!canProceed() || submitting) && styles.nextBtnDisabled]} onPress={() => { if (step < 4) { setStep(step + 1); fadeAnim.setValue(0); scrollRef.current?.scrollTo({ y: 0, animated: true }); } else { handleSubmit(); } }} activeOpacity={0.7} disabled={!canProceed() || submitting}>
+            <Text style={styles.nextBtnText}>{step < 4 ? 'Continue' : submitting ? 'Submitting…' : 'Submit Project'}</Text>
+            <MaterialIcons name={step < 4 ? 'arrow-forward' : submitting ? 'hourglass-top' : 'check'} size={18} color="#fff" />
           </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>

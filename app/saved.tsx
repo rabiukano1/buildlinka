@@ -4,12 +4,11 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { Colors } from '../constants/Colors';
 import { useCart } from '../contexts/CartContext';
 import { useSaved } from '../contexts/SavedItemsContext';
-
-const formatPrice = (price: number) => '₦' + price.toLocaleString('en-NG');
+import ProductCard from '../components/ProductCard';
 
 export default function SavedScreen() {
   const router = useRouter();
-  const { items, toggleSave, clearSaved } = useSaved();
+  const { items, toggleSave, clearSaved, isSaved } = useSaved();
   const { addItem } = useCart();
 
   return (
@@ -28,38 +27,18 @@ export default function SavedScreen() {
       ) : (
         <FlatList
           data={items}
-          keyExtractor={(item) => item.id}
+          keyExtractor={(item) => item._id}
           contentContainerStyle={styles.list}
           showsVerticalScrollIndicator={false}
           renderItem={({ item }) => (
-            <TouchableOpacity
-              style={styles.savedItem}
-              activeOpacity={0.8}
-              onPress={() => router.push(`/product/${item.id}`)}
-            >
-              <View style={styles.itemEmoji}>
-                <Text style={styles.emoji}>{item.imageEmoji}</Text>
-              </View>
-              <View style={styles.itemInfo}>
-                <Text style={styles.itemName} numberOfLines={1}>{item.name}</Text>
-                <Text style={styles.itemVendor}>{item.vendor}</Text>
-                <View style={styles.itemRow}>
-                  <Text style={styles.itemPrice}>{formatPrice(item.price)}</Text>
-                  <View style={styles.ratingRow}>
-                    <MaterialIcons name="star" size={12} color={Colors.amber} />
-                    <Text style={styles.ratingText}>{item.rating}</Text>
-                  </View>
-                </View>
-              </View>
-              <View style={styles.actions}>
-                <TouchableOpacity style={styles.cartBtn} onPress={() => addItem(item, 1)}>
-                  <MaterialIcons name="shopping-cart" size={16} color="#fff" />
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.removeBtn} onPress={() => toggleSave(item)}>
-                  <MaterialIcons name="close" size={16} color={Colors.textLight} />
-                </TouchableOpacity>
-              </View>
-            </TouchableOpacity>
+            <ProductCard
+              product={item}
+              horizontal
+              onPress={() => router.push(`/product/${item._id}`)}
+              onAddToCart={() => addItem(item)}
+              onToggleSave={() => toggleSave(item)}
+              isSaved={isSaved(item._id)}
+            />
           )}
           ListFooterComponent={
             <TouchableOpacity style={styles.clearBtn} onPress={clearSaved}>
@@ -114,79 +93,6 @@ const styles = StyleSheet.create({
   list: {
     padding: 16,
     paddingBottom: 32,
-  },
-  savedItem: {
-    flexDirection: 'row',
-    backgroundColor: Colors.card,
-    borderRadius: 8,
-    padding: 12,
-    marginBottom: 12,
-    borderLeftWidth: 3,
-    borderLeftColor: Colors.primaryOrange,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  itemEmoji: {
-    width: 64,
-    height: 64,
-    borderRadius: 8,
-    backgroundColor: Colors.surfaceVariant,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 12,
-  },
-  emoji: { fontSize: 28 },
-  itemInfo: {
-    flex: 1,
-    gap: 2,
-  },
-  itemName: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: Colors.textDark,
-  },
-  itemVendor: {
-    fontSize: 11,
-    color: Colors.textMedium,
-  },
-  itemRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginTop: 4,
-  },
-  itemPrice: {
-    fontSize: 16,
-    fontWeight: '800',
-    color: Colors.primaryGreen,
-  },
-  ratingRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 3,
-  },
-  ratingText: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: Colors.textMedium,
-  },
-  actions: {
-    justifyContent: 'center',
-    gap: 8,
-    marginLeft: 8,
-  },
-  cartBtn: {
-    backgroundColor: Colors.secondary,
-    borderRadius: 99,
-    padding: 8,
-  },
-  removeBtn: {
-    borderRadius: 99,
-    padding: 6,
-    alignItems: 'center',
   },
   clearBtn: {
     flexDirection: 'row',

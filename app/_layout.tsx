@@ -1,4 +1,6 @@
 import { Stack } from 'expo-router';
+import { ConvexAuthProvider } from '@convex-dev/auth/react';
+import { convex, tokenStorage } from '../lib/backend';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { Colors } from '../constants/Colors';
 import { CartProvider } from '../contexts/CartContext';
@@ -10,6 +12,7 @@ import { EngineerProvider } from '../contexts/EngineerContext';
 export default function RootLayout() {
   return (
     <SafeAreaProvider>
+      <ConvexAuthProvider client={convex} storage={tokenStorage}>
       <CartProvider>
       <SavedProvider>
       <NotificationProvider>
@@ -390,6 +393,7 @@ export default function RootLayout() {
       </NotificationProvider>
       </SavedProvider>
       </CartProvider>
+      </ConvexAuthProvider>
     </SafeAreaProvider>
   );
 }

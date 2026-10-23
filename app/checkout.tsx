@@ -1,23 +1,29 @@
-import { useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator } from 'react-native';
+import { useEffect, useState } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Alert } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
 import { MaterialIcons } from '@expo/vector-icons';
+import { Image } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useMutation } from 'convex/react';
+import { api } from '../convex/_generated/api';
+import type { Id } from '../convex/_generated/dataModel';
 import KeyboardAwareWrapper from '../components/KeyboardAwareWrapper';
 import { Field } from '../components/EngineerUI';
 import { Colors } from '../constants/Colors';
 import { useCart } from '../contexts/CartContext';
 import { useLocation } from '../hooks/useLocation';
-
-const formatPrice = (price: number) => '₦' + price.toLocaleString('en-NG');
+import { errorMessage, formatPrice, goBackOrHome } from '../lib/backend';
 
 const DELIVERY_METHODS = [
   { id: 'standard', label: 'Standard delivery', eta: '3–5 business days', price: 2500, icon: 'local-shipping' },
   { id: 'express', label: 'Express delivery', eta: '1–2 business days', price: 5000, icon: 'bolt' },
   { id: 'pickup', label: 'Pickup station', eta: 'Ready in 24 hours', price: 0, icon: 'storefront' },
-];
+] as const;
 
-const PAYMENT_METHODS = [
+type DeliveryId = (typeof DELIVERY_METHODS)[number]['id'];
+type PaymentId = 'card' | 'bank' | 'paystack';
+
+const PAYMENT_METHODS: { id: PaymentId; label: string; icon: string; note: string }[] = [
   { id: 'card', label: 'Debit / credit card', icon: 'credit-card', note: "You'll enter card details on a secure page." },
   { id: 'bank', label: 'Bank transfer', icon: 'account-balance', note: "We'll show account details after you place the order." },
   { id: 'paystack', label: 'Paystack', icon: 'payments', note: 'Pay with card, USSD or bank via Paystack.' },
@@ -25,7 +31,7 @@ const PAYMENT_METHODS = [
 
 const PICKUP_STATION = { name: 'BuildLinka Hub, Ikeja', address: '18 Ikorodu Road, Ikeja, Lagos', hours: 'Mon–Sat, 8am–6pm' };
 
-type PlacedOrder = { id: string; items: number; total: number; delivery: string; eta: string; payment: string };
+type PlacedOrder = { numbers: string[]; items: number; total: number; delivery: string; eta: string; payment: string };
 
 function Option({ selected, icon, title, subtitle, right, onPress }: {
   selected: boolean; icon: string; title: string; subtitle: string; right?: string; onPress: () => void;
@@ -64,15 +70,17 @@ export default function CheckoutScreen() {
   const insets = useSafeAreaInsets();
   const { items, totalItems, totalPrice, clearCart } = useCart();
   const { place, loading: locating, permission, refresh: locate } = useLocation({ auto: false });
+  const placeOrders = useMutation(api.orders.place);
 
-  const [delivery, setDelivery] = useState('standard');
-  const [payment, setPayment] = useState('card');
+  const [delivery, setDelivery] = useState<DeliveryId>('standard');
+  const [payment, setPayment] = useState<PaymentId>('card');
   const [address, setAddress] = useState('');
   const [city, setCity] = useState('');
   const [state, setState] = useState('');
   const [phone, setPhone] = useState('');
   const [wantGps, setWantGps] = useState(false);
   const [showErrors, setShowErrors] = useState(false);
+  const [placing, setPlacing] = useState(false);
   const [order, setOrder] = useState<PlacedOrder | null>(null);
 
   const method = DELIVERY_METHODS.find((m) => m.id === delivery)!;
@@ -80,12 +88,14 @@ export default function CheckoutScreen() {
   const grandTotal = totalPrice + method.price;
 
   // Fill the form once GPS answers after the user asked for it.
-  if (wantGps && place) {
-    setWantGps(false);
-    setAddress([place.streetNumber, place.street].filter(Boolean).join(' ') || place.name || '');
-    setCity(place.city ?? place.subregion ?? '');
-    setState(place.region ?? '');
-  }
+  useEffect(() => {
+    if (wantGps && place) {
+      setWantGps(false);
+      setAddress([place.streetNumber, place.street].filter(Boolean).join(' ') || place.name || '');
+      setCity(place.city ?? place.subregion ?? '');
+      setState(place.region ?? '');
+    }
+  }, [wantGps, place]);
 
   const errors: Record<string, string> = {};
   if (!isPickup) {
@@ -102,20 +112,35 @@ export default function CheckoutScreen() {
     locate();
   };
 
-  const placeOrder = () => {
+  const placeOrder = async () => {
     if (missing) {
       setShowErrors(true);
       return;
     }
-    setOrder({
-      id: 'BL-' + Date.now().toString().slice(-6),
-      items: totalItems,
-      total: grandTotal,
-      delivery: method.label,
-      eta: method.eta,
-      payment: PAYMENT_METHODS.find((p) => p.id === payment)!.label,
-    });
-    clearCart();
+    if (placing) return;
+    setPlacing(true);
+    try {
+      const result = await placeOrders({
+        items: items.map((i) => ({ productId: i.product._id as Id<'products'>, quantity: i.quantity })),
+        deliveryMethod: delivery,
+        ...(isPickup ? {} : { address: { street: address.trim(), city: city.trim(), state: state.trim() } }),
+        phone: phone.trim(),
+        paymentMethod: payment,
+      });
+      setOrder({
+        numbers: result.orders.map((o) => o.number),
+        items: totalItems,
+        total: result.grandTotal,
+        delivery: method.label,
+        eta: method.eta,
+        payment: PAYMENT_METHODS.find((p) => p.id === payment)!.label,
+      });
+      clearCart();
+    } catch (e) {
+      Alert.alert('Could not place order', errorMessage(e));
+    } finally {
+      setPlacing(false);
+    }
   };
 
   if (order) {
@@ -127,10 +152,10 @@ export default function CheckoutScreen() {
             <MaterialIcons name="check" size={48} color={Colors.onPrimary} />
           </View>
           <Text style={styles.successTitle}>Thank you!</Text>
-          <Text style={styles.successText}>Order {order.id} is confirmed. We'll notify you when it ships.</Text>
+          <Text style={styles.successText}>Order {order.numbers[0]}{order.numbers.length > 1 ? ` (+${order.numbers.length - 1} more)` : ''} is confirmed. We'll notify you when it ships.</Text>
           <View style={[styles.card, styles.successCard]}>
             {[
-              ['Order number', order.id],
+              ['Order number', order.numbers.join(', ')],
               ['Items', String(order.items)],
               ['Delivery', `${order.delivery} · ${order.eta}`],
               ['Payment', order.payment],
@@ -173,9 +198,13 @@ export default function CheckoutScreen() {
         <Text style={styles.footerLabel}>{missing && showErrors ? `${missing} field${missing > 1 ? 's' : ''} to fix` : 'Total'}</Text>
         <Text style={styles.footerTotal}>{formatPrice(grandTotal)}</Text>
       </View>
-      <TouchableOpacity style={[styles.placeBtn, !!missing && styles.placeBtnIdle]} onPress={placeOrder} activeOpacity={0.8}>
-        <MaterialIcons name="lock" size={18} color={Colors.onSecondary} />
-        <Text style={styles.ctaText}>Place order</Text>
+      <TouchableOpacity style={[styles.placeBtn, !!missing && styles.placeBtnIdle]} onPress={placeOrder} activeOpacity={0.8} disabled={placing}>
+        {placing ? (
+          <ActivityIndicator size="small" color={Colors.onSecondary} />
+        ) : (
+          <MaterialIcons name="lock" size={18} color={Colors.onSecondary} />
+        )}
+        <Text style={styles.ctaText}>{placing ? 'Placing…' : 'Place order'}</Text>
       </TouchableOpacity>
     </View>
   );
@@ -188,14 +217,18 @@ export default function CheckoutScreen() {
         <View style={[styles.card, styles.itemsCard]}>
           <View style={styles.itemsHead}>
             <Text style={styles.itemsTitle}>{totalItems} item{totalItems !== 1 ? 's' : ''}</Text>
-            <TouchableOpacity onPress={() => router.back()} hitSlop={8}>
+            <TouchableOpacity onPress={() => goBackOrHome()} hitSlop={8}>
               <Text style={styles.link}>Edit cart</Text>
             </TouchableOpacity>
           </View>
           {items.map((item) => (
-            <View key={item.product.id} style={styles.item}>
+            <View key={item.product._id} style={styles.item}>
               <View style={styles.itemThumb}>
-                <Text style={styles.itemEmoji}>{item.product.imageEmoji}</Text>
+                {item.product.photoUrls[0] ? (
+                  <Image source={{ uri: item.product.photoUrls[0] }} style={{ width: 44, height: 44, borderRadius: 8 }} contentFit="cover" />
+                ) : (
+                  <Text style={styles.itemEmoji}>📦</Text>
+                )}
               </View>
               <View style={styles.flex}>
                 <Text style={styles.itemName} numberOfLines={1}>{item.product.name}</Text>
@@ -319,7 +352,7 @@ const styles = StyleSheet.create({
   itemsHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
   itemsTitle: { fontSize: 16, fontWeight: '600', color: Colors.onSurface },
   item: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 8 },
-  itemThumb: { width: 44, height: 44, borderRadius: 8, backgroundColor: Colors.surfaceVariant + '80', alignItems: 'center', justifyContent: 'center' },
+  itemThumb: { width: 44, height: 44, borderRadius: 8, backgroundColor: Colors.surfaceVariant + '80', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
   itemEmoji: { fontSize: 22 },
   itemName: { fontSize: 14, fontWeight: '600', color: Colors.onSurface },
   itemQty: { fontSize: 13, color: Colors.outline, marginTop: 2 },

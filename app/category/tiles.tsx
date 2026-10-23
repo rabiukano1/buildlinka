@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { PRODUCTS } from '../../constants/MockData';
+import { useQuery } from 'convex/react';
+import { api } from '../../convex/_generated/api';
 import CategoryShell, { EmptyResult, Footnote, Label, OrderLine, Result, Row, Wrap, numeric } from '../../components/CategoryShell';
 import { Chip, Field } from '../../components/EngineerUI';
 import { tiles } from '../../lib/estimators';
@@ -19,7 +20,8 @@ export default function TilesScreen() {
 
   const waste = LAYOUTS.find((l) => l.id === layout)!.waste;
   const est = tiles(parseFloat(length), parseFloat(width), size, waste);
-  const product = PRODUCTS.find((p) => p.category === 'Tiles' && p.name.includes(`${size[0]}x${size[1]}`));
+  const tilesProducts = useQuery(api.products.list, { category: 'Tiles' }) ?? [];
+  const product = tilesProducts.find((p) => p.name.includes(`${size[0]}x${size[1]}`));
 
   return (
     <CategoryShell

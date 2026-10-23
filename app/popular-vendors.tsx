@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -8,62 +8,30 @@ import {
   Animated,
   StatusBar,
   TextInput,
+  ActivityIndicator,
 } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
 import { MaterialIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useQuery } from 'convex/react';
+import { api } from '../convex/_generated/api';
 import { Colors } from '../constants/Colors';
-import { VENDORS } from '../constants/MockData';
 import KeyboardAwareWrapper from '../components/KeyboardAwareWrapper';
+import { goBackOrHome } from '../lib/backend';
 
-const ALL_VENDORS = [
-  ...VENDORS,
-  {
-    id: 'v5',
-    name: 'Kano Block Factory',
-    category: 'Blocks & Bricks',
-    rating: 4.5,
-    location: 'Kano City',
-    verified: true,
-    emoji: '🧱',
-    description: 'Premium sandcrete blocks & bricks at factory prices',
-  },
-  {
-    id: 'v6',
-    name: 'ColourShop Abuja',
-    category: 'Paint & Finishes',
-    rating: 4.6,
-    location: 'Wuse, Abuja',
-    verified: true,
-    emoji: '🎨',
-    description: 'Emulsion, gloss, satin & industrial paints',
-  },
-  {
-    id: 'v7',
-    name: 'PlumbShop PH',
-    category: 'Plumbing',
-    rating: 4.4,
-    location: 'Port Harcourt',
-    verified: false,
-    emoji: '🔧',
-    description: 'PVC pipes, fittings & bathroom accessories',
-  },
-  {
-    id: 'v8',
-    name: 'Abuja Materials Hub',
-    category: 'General Materials',
-    rating: 4.7,
-    location: 'Garki, Abuja',
-    verified: true,
-    emoji: '🏪',
-    description: 'Comprehensive building materials supplier',
-  },
-];
+type Store = {
+  _id: string;
+  name: string;
+  location: string;
+  description: string;
+  verified: boolean;
+  isOpen: boolean;
+  productCount: number;
+  categories: string[];
+};
 
-const CATEGORIES = [...new Set(ALL_VENDORS.map((v) => v.category))];
-
-function VendorCard({ vendor, index }: { vendor: typeof ALL_VENDORS[0]; index: number }) {
+function VendorCard({ vendor, index }: { vendor: Store; index: number }) {
   const anim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
@@ -79,7 +47,7 @@ function VendorCard({ vendor, index }: { vendor: typeof ALL_VENDORS[0]; index: n
     <Animated.View style={[styles.vendorCard, { opacity: anim, transform: [{ translateY: anim.interpolate({ inputRange: [0, 1], outputRange: [20, 0] }) }] }]}>
       <View style={styles.vendorTop}>
         <View style={styles.vendorEmojiWrap}>
-          <Text style={styles.vendorEmoji}>{vendor.emoji}</Text>
+          <MaterialIcons name="store" size={24} color={Colors.primary} />
         </View>
         <View style={styles.vendorInfo}>
           <View style={styles.vendorNameRow}>
@@ -88,28 +56,33 @@ function VendorCard({ vendor, index }: { vendor: typeof ALL_VENDORS[0]; index: n
               <MaterialIcons name="verified" size={14} color={Colors.primary} />
             )}
           </View>
-          <Text style={styles.vendorCategory}>{vendor.category}</Text>
+          <Text style={styles.vendorCategory} numberOfLines={1}>
+            {vendor.categories.length > 0 ? vendor.categories.slice(0, 3).join(' · ') : 'General store'}
+          </Text>
           <View style={styles.vendorMeta}>
             <View style={styles.vendorRating}>
-              <MaterialIcons name="star" size={12} color="#f5a623" />
-              <Text style={styles.vendorRatingText}>{vendor.rating}</Text>
+              <MaterialIcons name="inventory-2" size={12} color={Colors.primary} />
+              <Text style={styles.vendorRatingText}>{vendor.productCount} product{vendor.productCount !== 1 ? 's' : ''}</Text>
             </View>
             <Text style={styles.vendorDot}>·</Text>
             <MaterialIcons name="location-on" size={11} color={Colors.textLight} />
-            <Text style={styles.vendorLocation}>{vendor.location}</Text>
+            <Text style={styles.vendorLocation} numberOfLines={1}>{vendor.location}</Text>
           </View>
         </View>
       </View>
-      <Text style={styles.vendorDesc} numberOfLines={2}>{vendor.description}</Text>
+      {!!vendor.description && <Text style={styles.vendorDesc} numberOfLines={2}>{vendor.description}</Text>}
+      {!vendor.isOpen && <Text style={styles.closedNote}>Currently closed — not taking orders right now.</Text>}
       <View style={styles.vendorActions}>
         <TouchableOpacity style={styles.vendorBtn}>
           <MaterialIcons name="store" size={16} color={Colors.primary} />
           <Text style={styles.vendorBtnText}>Visit Store</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={styles.vendorCallBtn}>
-          <MaterialIcons name="phone" size={16} color={Colors.secondary} />
-          <Text style={styles.vendorCallText}>Call</Text>
-        </TouchableOpacity>
+        {vendor.verified && (
+          <View style={styles.verifiedPill}>
+            <MaterialIcons name="verified" size={16} color={Colors.primary} />
+            <Text style={styles.verifiedText}>Verified</Text>
+          </View>
+        )}
       </View>
     </Animated.View>
   );
@@ -121,9 +94,18 @@ export default function PopularVendorsScreen() {
   const [search, setSearch] = useState('');
   const [filterCat, setFilterCat] = useState('All');
 
-  const filtered = ALL_VENDORS.filter((v) => {
-    const matchesSearch = v.name.toLowerCase().includes(search.toLowerCase()) || v.description.toLowerCase().includes(search.toLowerCase());
-    const matchesCat = filterCat === 'All' || v.category === filterCat;
+  const stores = useQuery(api.stores.list, { limit: 50 });
+
+  const categories = useMemo(() => {
+    const set = new Set<string>();
+    for (const s of stores ?? []) for (const c of s.categories) set.add(c);
+    return [...set].sort();
+  }, [stores]);
+
+  const filtered = (stores ?? []).filter((v) => {
+    const q = search.trim().toLowerCase();
+    const matchesSearch = !q || v.name.toLowerCase().includes(q) || v.description.toLowerCase().includes(q) || v.location.toLowerCase().includes(q);
+    const matchesCat = filterCat === 'All' || v.categories.includes(filterCat);
     return matchesSearch && matchesCat;
   });
 
@@ -139,12 +121,12 @@ export default function PopularVendorsScreen() {
         end={{ x: 1, y: 1 }}
       >
         <View style={styles.headerRow}>
-          <TouchableOpacity style={styles.backBtn} onPress={() => router.back()} activeOpacity={0.7}>
+          <TouchableOpacity style={styles.backBtn} onPress={() => goBackOrHome()} activeOpacity={0.7}>
             <MaterialIcons name="arrow-back" size={22} color="#fff" />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Popular Vendors</Text>
           <View style={styles.headerCount}>
-            <Text style={styles.headerCountText}>{ALL_VENDORS.length}</Text>
+            <Text style={styles.headerCountText}>{stores?.length ?? 0}</Text>
           </View>
         </View>
 
@@ -173,7 +155,7 @@ export default function PopularVendorsScreen() {
         contentContainerStyle={styles.filterRow}
         style={styles.filterStrip}
       >
-        {['All', ...CATEGORIES].map((cat) => (
+        {['All', ...categories].map((cat) => (
           <TouchableOpacity
             key={cat}
             style={[styles.filterChip, filterCat === cat && styles.filterChipActive]}
@@ -189,15 +171,23 @@ export default function PopularVendorsScreen() {
         contentContainerStyle={[styles.scrollContent, { paddingBottom: 32 + insets.bottom }]}
         showsVerticalScrollIndicator={false}
       >
-        {filtered.map((vendor, i) => (
-          <VendorCard key={vendor.id} vendor={vendor} index={i} />
-        ))}
-
-        {filtered.length === 0 && (
+        {stores === undefined ? (
+          <View style={styles.loading}>
+            <ActivityIndicator size="large" color={Colors.primary} />
+            <Text style={styles.emptyText}>Loading vendors…</Text>
+          </View>
+        ) : filtered.length === 0 ? (
           <View style={styles.empty}>
             <MaterialIcons name="store" size={48} color={Colors.textMuted} />
             <Text style={styles.emptyText}>No vendors found</Text>
+            <Text style={styles.emptySub}>
+              {stores.length === 0 ? 'No vendor stores yet. Check back soon.' : 'Try a different search or category.'}
+            </Text>
           </View>
+        ) : (
+          filtered.map((vendor, i) => (
+            <VendorCard key={vendor._id} vendor={vendor} index={i} />
+          ))
         )}
       </KeyboardAwareWrapper>
     </View>
@@ -334,9 +324,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  vendorEmoji: {
-    fontSize: 24,
-  },
   vendorInfo: {
     flex: 1,
     gap: 2,
@@ -381,11 +368,17 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: Colors.textLight,
     fontWeight: '500',
+    flex: 1,
   },
   vendorDesc: {
     fontSize: 12,
     color: Colors.textMedium,
     lineHeight: 17,
+  },
+  closedNote: {
+    fontSize: 12,
+    color: Colors.warning,
+    fontWeight: '600',
   },
   vendorActions: {
     flexDirection: 'row',
@@ -406,23 +399,29 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: Colors.primary,
   },
-  vendorCallBtn: {
+  verifiedPill: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
-    backgroundColor: Colors.secondary + '10',
+    backgroundColor: Colors.primary + '10',
     borderRadius: 99,
     paddingVertical: 10,
     paddingHorizontal: 20,
   },
-  vendorCallText: {
+  verifiedText: {
     fontSize: 13,
     fontWeight: '700',
-    color: Colors.secondary,
+    color: Colors.primary,
   },
 
-  /* ─── Empty ─── */
+  /* ─── Loading / Empty ─── */
+  loading: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 60,
+    gap: 12,
+  },
   empty: {
     alignItems: 'center',
     justifyContent: 'center',
@@ -433,5 +432,11 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: Colors.textMuted,
     fontWeight: '500',
+  },
+  emptySub: {
+    fontSize: 12,
+    color: Colors.textLight,
+    textAlign: 'center',
+    paddingHorizontal: 32,
   },
 });

@@ -13,6 +13,7 @@ import { Stack, useRouter } from 'expo-router';
 import { MaterialIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { goBackOrHome } from '../lib/backend';
 import { Colors } from '../constants/Colors';
 
 export default function PrivacySecurityScreen() {
@@ -34,7 +35,7 @@ export default function PrivacySecurityScreen() {
         end={{ x: 1.2, y: 1.2 }}
       >
         <View style={styles.headerRow}>
-          <TouchableOpacity style={styles.backBtn} onPress={() => router.back()} activeOpacity={0.7}>
+          <TouchableOpacity style={styles.backBtn} onPress={() => goBackOrHome()} activeOpacity={0.7}>
             <MaterialIcons name="arrow-back" size={20} color="#fff" />
           </TouchableOpacity>
           <View style={styles.headerTitleArea}>

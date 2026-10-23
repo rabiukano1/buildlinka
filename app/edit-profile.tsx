@@ -1,25 +1,46 @@
 import KeyboardAwareWrapper from '../components/KeyboardAwareWrapper';
-import { useState, useMemo } from 'react';
-import { View, Text, ScrollView, StyleSheet, TouchableOpacity, TextInput, Alert, Image } from 'react-native';
+import { useState, useMemo, useEffect } from 'react';
+import { View, Text, ScrollView, StyleSheet, TouchableOpacity, TextInput, Alert, Image, ActivityIndicator } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
 import { MaterialIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as ImagePicker from 'expo-image-picker';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useMutation, useQuery } from 'convex/react';
+import { api } from '../convex/_generated/api';
 import { Colors } from '../constants/Colors';
+import { errorMessage, goBackOrHome, uploadPhoto } from '../lib/backend';
 
 const MAX_BIO = 200;
 
 export default function EditProfileScreen() {
   const router = useRouter();
-  const [name, setName] = useState('John Doe');
-  const [phone, setPhone] = useState('+234 801 234 5678');
-  const [email, setEmail] = useState('john.doe@example.com');
-  const [location, setLocation] = useState('Ikeja, Lagos');
-  const [bio, setBio] = useState('Building materials supplier with 5+ years of experience.');
+  const me = useQuery(api.users.me);
+  const updateProfile = useMutation(api.users.updateProfile);
+  const generateUploadUrl = useMutation(api.files.generateUploadUrl);
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [location, setLocation] = useState('');
+  const [bio, setBio] = useState('');
   const [avatar, setAvatar] = useState<string | null>(null);
+  const [loaded, setLoaded] = useState(false);
   const insets = useSafeAreaInsets();
   const [saving, setSaving] = useState(false);
+
+  // Prefill once the real user loads.
+  useEffect(() => {
+    if (me && !loaded) {
+      setName(me.name);
+      setEmail(me.email ?? '');
+      setLocation(me.location);
+      setBio(me.bio);
+      setAvatar(me.photoUrl);
+      setLoaded(true);
+    }
+  }, [me, loaded]);
+
+  // Phone number is the login identity — it cannot be changed here.
+  const phone = me?.phone ?? '';
 
   const pickAvatar = () => {
     ImagePicker.launchImageLibraryAsync({
@@ -32,21 +53,46 @@ export default function EditProfileScreen() {
     });
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
+    if (saving) return;
     setSaving(true);
-    setTimeout(() => {
-      setSaving(false);
+    try {
+      let photo: string | undefined;
+      if (avatar && avatar.startsWith('file://')) {
+        const uploadUrl = await generateUploadUrl({});
+        photo = (await uploadPhoto(uploadUrl, avatar)) as string;
+      }
+      await updateProfile({
+        name: name.trim(),
+        email: email.trim() || undefined,
+        location: location.trim() || undefined,
+        bio: bio.trim() || undefined,
+        ...(photo ? { photo: photo as never } : {}),
+      });
       Alert.alert('Profile Updated', 'Your profile has been saved successfully.', [
-        { text: 'OK', onPress: () => router.back() },
+        { text: 'OK', onPress: () => goBackOrHome() },
       ]);
-    }, 800);
+    } catch (err) {
+      Alert.alert('Could not save', errorMessage(err));
+    } finally {
+      setSaving(false);
+    }
   };
 
   const initials = useMemo(() => {
     return name.split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2) || '?';
   }, [name]);
 
-  const canSave = name.trim() && phone.trim() && email.trim();
+  const canSave = name.trim().length >= 2 && !saving;
+
+  if (me === undefined || !loaded) {
+    return (
+      <View style={[styles.container, { alignItems: 'center', justifyContent: 'center' }]}>
+        <Stack.Screen options={{ headerTitle: 'Edit Profile' }} />
+        <ActivityIndicator size="large" color={Colors.primaryGreen} />
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>
@@ -67,34 +113,35 @@ export default function EditProfileScreen() {
               <MaterialIcons name="camera-alt" size={12} color="#fff" />
             </View>
           </TouchableOpacity>
-          <Text style={styles.heroName}>{name}</Text>
-          <Text style={styles.heroRole}>Building Materials Supplier</Text>
+          <Text style={styles.heroName}>{name || 'Your profile'}</Text>
+          <Text style={styles.heroRole}>
+            {me?.activeRole ? me.activeRole[0].toUpperCase() + me.activeRole.slice(1) : 'Member'}
+            {me?.store ? ` · ${me.store.name}` : ''}
+          </Text>
           <View style={styles.badgeRow}>
-            <View style={styles.badge}>
-              <MaterialIcons name="verified" size={12} color={Colors.primary} />
-              <Text style={styles.badgeText}>Verified</Text>
-            </View>
-            <View style={styles.badge}>
-              <MaterialIcons name="star" size={12} color={Colors.amber} />
-              <Text style={styles.badgeText}>4.8 Rating</Text>
-            </View>
+            {me?.store && (
+              <View style={styles.badge}>
+                <MaterialIcons name="storefront" size={12} color={Colors.primary} />
+                <Text style={styles.badgeText}>Store owner</Text>
+              </View>
+            )}
           </View>
         </View>
 
         <View style={styles.statsRow}>
           <View style={styles.statCard}>
-            <Text style={styles.statNum}>28</Text>
-            <Text style={styles.statLabel}>Orders</Text>
+            <Text style={styles.statNum}>{me?.roles.length ?? 0}</Text>
+            <Text style={styles.statLabel}>Roles</Text>
           </View>
           <View style={styles.statVr} />
           <View style={styles.statCard}>
-            <Text style={styles.statNum}>12</Text>
-            <Text style={styles.statLabel}>Listings</Text>
+            <Text style={styles.statNum}>{me?.store ? 1 : 0}</Text>
+            <Text style={styles.statLabel}>Stores</Text>
           </View>
           <View style={styles.statVr} />
           <View style={styles.statCard}>
-            <Text style={styles.statNum}>156</Text>
-            <Text style={styles.statLabel}>Days Active</Text>
+            <Text style={styles.statNum}>{me ? new Date(me.joinedAt).getFullYear() : '—'}</Text>
+            <Text style={styles.statLabel}>Member since</Text>
           </View>
         </View>
 
@@ -119,8 +166,8 @@ export default function EditProfileScreen() {
                 <MaterialIcons name="phone" size={18} color={Colors.textMuted} />
               </View>
               <View style={styles.fieldBody}>
-                <Text style={styles.fieldLabel}>Phone Number</Text>
-                <TextInput style={styles.input} value={phone} onChangeText={setPhone} placeholder="+234 XXX XXX XXXX" placeholderTextColor={Colors.textLight} keyboardType="phone-pad" />
+                <Text style={styles.fieldLabel}>Phone Number (login — cannot change)</Text>
+                <TextInput style={[styles.input, { opacity: 0.6 }]} value={phone} editable={false} keyboardType="phone-pad" />
               </View>
             </View>
             <View style={styles.divider} />
@@ -181,7 +228,7 @@ export default function EditProfileScreen() {
       </KeyboardAwareWrapper>
 
       <View style={[styles.footer, { paddingBottom: insets.bottom + 16 }]}>
-        <TouchableOpacity style={styles.cancelBtn} onPress={() => router.back()} activeOpacity={0.7}>
+        <TouchableOpacity style={styles.cancelBtn} onPress={() => goBackOrHome()} activeOpacity={0.7}>
           <MaterialIcons name="close" size={18} color={Colors.textMedium} />
           <Text style={styles.cancelText}>Cancel</Text>
         </TouchableOpacity>

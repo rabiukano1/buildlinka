@@ -1,11 +1,12 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
+import { Image } from 'expo-image';
 import { Colors } from '../constants/Colors';
-import type { Product } from '../constants/MockData';
+import { formatPrice, type BackendProduct } from '../lib/backend';
 
 type Props = {
-  product: Product;
+  product: BackendProduct;
   onPress?: () => void;
   onAddToCart?: () => void;
   onToggleSave?: () => void;
@@ -13,27 +14,33 @@ type Props = {
   horizontal?: boolean;
 };
 
-const formatPrice = (price: number) =>
-  '₦' + price.toLocaleString('en-NG');
+function ProductImage({ uri, size }: { uri?: string; size: number }) {
+  if (uri) return <Image source={{ uri }} style={{ width: size, height: size, borderRadius: 8 }} contentFit="cover" />;
+  return <Text style={[styles.emoji, { fontSize: size * 0.45 }]}>📦</Text>;
+}
+
+function VerifiedRow({ storeName, verified }: { storeName: string; verified: boolean }) {
+  return (
+    <View style={styles.vendorRow}>
+      <MaterialIcons name="store" size={11} color={Colors.textMuted} />
+      <Text style={styles.vendorText} numberOfLines={1}>{storeName}</Text>
+      {verified && <MaterialIcons name="verified" size={12} color={Colors.primaryGreen} />}
+    </View>
+  );
+}
 
 export default function ProductCard({ product, onPress, onAddToCart, onToggleSave, isSaved, horizontal }: Props) {
+  const out = product.stock <= 0;
   if (horizontal) {
     return (
       <TouchableOpacity style={styles.hCard} onPress={onPress} activeOpacity={0.8}>
         <View style={styles.hEmoji}>
-          <Text style={styles.emojiLarge}>{product.imageEmoji}</Text>
+          <ProductImage uri={product.photoUrls[0]} size={64} />
         </View>
         <View style={styles.hInfo}>
           <View style={styles.hTop}>
-            {product.badge && (
-              <View style={[styles.badge, product.badge === 'Best Seller' && styles.badgeOrange]}>
-                <Text style={styles.badgeText}>{product.badge}</Text>
-              </View>
-            )}
             <Text style={styles.hName} numberOfLines={1}>{product.name}</Text>
-            <Text style={styles.hVendor}>
-              <MaterialIcons name="store" size={11} color={Colors.textMuted} /> {product.vendor}
-            </Text>
+            <VerifiedRow storeName={product.storeName} verified={product.storeVerified} />
           </View>
           <View style={styles.hBottom}>
             <View>
@@ -41,13 +48,9 @@ export default function ProductCard({ product, onPress, onAddToCart, onToggleSav
               <Text style={styles.hUnit}>per {product.unit}</Text>
             </View>
             <View style={styles.hRight}>
-              <View style={styles.ratingRow}>
-                <MaterialIcons name="star" size={12} color={Colors.amber} />
-                <Text style={styles.ratingText}>{product.rating}</Text>
-              </View>
-              <TouchableOpacity style={styles.addBtn} onPress={onAddToCart} activeOpacity={0.7}>
+              <TouchableOpacity style={[styles.addBtn, out && styles.addBtnOff]} onPress={onAddToCart} disabled={out} activeOpacity={0.7}>
                 <MaterialIcons name="shopping-cart" size={14} color="#fff" />
-                <Text style={styles.addBtnText}>Add</Text>
+                <Text style={styles.addBtnText}>{out ? 'Out' : 'Add'}</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -59,15 +62,10 @@ export default function ProductCard({ product, onPress, onAddToCart, onToggleSav
   return (
     <TouchableOpacity style={styles.card} onPress={onPress} activeOpacity={0.8}>
       <View style={styles.imageBox}>
-        <Text style={styles.emoji}>{product.imageEmoji}</Text>
-        {!product.inStock && (
+        <ProductImage uri={product.photoUrls[0]} size={72} />
+        {out && (
           <View style={styles.outOfStock}>
             <Text style={styles.outOfStockText}>Out of Stock</Text>
-          </View>
-        )}
-        {product.badge && (
-          <View style={[styles.badgeAbs, product.badge === 'Best Seller' && styles.badgeOrange]}>
-            <Text style={styles.badgeText}>{product.badge}</Text>
           </View>
         )}
         {onToggleSave && (
@@ -78,17 +76,11 @@ export default function ProductCard({ product, onPress, onAddToCart, onToggleSav
       </View>
       <View style={styles.info}>
         <Text style={styles.name} numberOfLines={2}>{product.name}</Text>
-        <Text style={styles.vendor} numberOfLines={1}>
-          <MaterialIcons name="store" size={11} color={Colors.textMuted} /> {product.vendor}
-        </Text>
+        <VerifiedRow storeName={product.storeName} verified={product.storeVerified} />
         <View style={styles.bottom}>
           <View>
             <Text style={styles.price}>{formatPrice(product.price)}</Text>
             <Text style={styles.unit}>/{product.unit}</Text>
-          </View>
-          <View style={styles.ratingRow}>
-            <MaterialIcons name="star" size={12} color={Colors.amber} />
-            <Text style={styles.ratingText}>{product.rating}</Text>
           </View>
         </View>
       </View>
@@ -186,8 +178,11 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#fff',
   },
+  addBtnOff: { opacity: 0.5 },
 
   /* Shared */
+  vendorRow: { flexDirection: 'row', alignItems: 'center', gap: 3, marginTop: 2, marginBottom: 6 },
+  vendorText: { fontSize: 11, color: Colors.textMedium, flexShrink: 1 },
   badge: {
     backgroundColor: Colors.primaryGreen,
     borderRadius: 4,

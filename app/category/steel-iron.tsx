@@ -4,7 +4,9 @@ import { useRouter } from 'expo-router';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors } from '../../constants/Colors';
-import { PRODUCTS, VENDORS, type Product } from '../../constants/MockData';
+import { useQuery } from 'convex/react';
+import { api } from '../../convex/_generated/api';
+import { type BackendProduct } from '../../lib/backend';
 import { useCart } from '../../contexts/CartContext';
 import { useSaved } from '../../contexts/SavedItemsContext';
 import ProductCard from '../../components/ProductCard';
@@ -39,7 +41,7 @@ const SECTIONS = [
 ];
 
 // "Iron Rod 12mm (6m)" → { dia: 12, length: 6 }
-const rodSpec = (p: Product) => {
+const rodSpec = (p: BackendProduct) => {
   const dia = p.name.match(/(\d+)\s*mm/i);
   const len = p.name.match(/\((\d+(?:\.\d+)?)\s*m\)/i);
   return dia ? { dia: Number(dia[1]), length: len ? Number(len[1]) : 12 } : null;
@@ -57,9 +59,8 @@ export default function SteelIronScreen() {
   const { addItem } = useCart();
   const { isSaved, toggleSave } = useSaved();
 
-  const steelProducts = PRODUCTS.filter((p) => p.category === 'Steel & Iron');
+  const steelProducts = useQuery(api.products.list, { category: 'Steel & Iron' }) ?? [];
   const stockedByDia = new Map(steelProducts.flatMap((p) => { const s = rodSpec(p); return s ? [[s.dia, { product: p, ...s }] as const] : []; }));
-  const vendor = VENDORS.find((v) => v.category === 'Steel & Iron');
 
   const [mode, setMode] = useState<Mode>('slab');
   const [stockLen, setStockLen] = useState(12);
@@ -265,22 +266,8 @@ export default function SteelIronScreen() {
 
         <Text style={[styles.sectionTitle, styles.sectionGap]}>Steel products</Text>
         {steelProducts.map((p) => (
-          <ProductCard key={p.id} product={p} horizontal onPress={() => router.push(`/product/${p.id}`)} onAddToCart={() => addItem(p)} onToggleSave={() => toggleSave(p)} isSaved={isSaved(p.id)} />
+          <ProductCard key={p._id} product={p} horizontal onPress={() => router.push(`/product/${p._id}`)} onAddToCart={() => addItem(p)} onToggleSave={() => toggleSave(p)} isSaved={isSaved(p._id)} />
         ))}
-
-        {vendor && (
-          <View style={[styles.card, styles.vendor]}>
-            <Text style={styles.vendorEmoji}>{vendor.emoji}</Text>
-            <View style={styles.flex}>
-              <View style={styles.vendorNameRow}>
-                <Text style={styles.vendorName}>{vendor.name}</Text>
-                {vendor.verified && <MaterialIcons name="verified" size={16} color={Colors.primary} />}
-              </View>
-              <Text style={styles.vendorMeta}>★ {vendor.rating} · {vendor.location}</Text>
-              <Text style={styles.vendorDesc}>{vendor.description}</Text>
-            </View>
-          </View>
-        )}
 
         <TouchableOpacity style={styles.installer} onPress={() => router.push('/(tabs)/workers' as any)} activeOpacity={0.85}>
           <View style={styles.installerIcon}>

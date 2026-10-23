@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, TextInput, ScrollView, Modal, Image, Alert, ActivityIndicator, Linking,
 } from 'react-native';
@@ -7,41 +7,53 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { CameraView, useCameraPermissions, type BarcodeScanningResult } from 'expo-camera';
 import * as ImagePicker from 'expo-image-picker';
+import { useQuery } from 'convex/react';
+import { api } from '../convex/_generated/api';
 import { Colors } from '../constants/Colors';
-import { CATEGORIES, PRODUCTS, WORKERS, type Product } from '../constants/MockData';
+import { formatPrice, goBackOrHome, type BackendProduct } from '../lib/backend';
 import { useCart } from '../contexts/CartContext';
 import { usePermissions } from '../hooks/usePermissions';
 import { imageSearchAvailable, searchByImage } from '../lib/imageSearch';
+import { Image as ExpoImage } from 'expo-image';
 
-const formatPrice = (n: number) => '₦' + n.toLocaleString('en-NG');
-const POPULAR = ['Dangote cement', 'Iron rod 12mm', 'Roofing sheet', 'Floor tiles', 'Electrician', 'Plumber'];
-const categorySlug = (name: string) => name.toLowerCase().replace(/&/g, '').trim().replace(/\s+/g, '-');
+// Static browse links for the routes that exist (no catalogue data involved).
+const BROWSE = [
+  { name: 'Cement', slug: 'cement', icon: 'foundation' },
+  { name: 'Steel & Iron', slug: 'steel-iron', icon: 'construction' },
+  { name: 'Roofing', slug: 'roofing', icon: 'roofing' },
+  { name: 'Electrical', slug: 'electrical', icon: 'bolt' },
+  { name: 'Plumbing', slug: 'plumbing', icon: 'plumbing' },
+  { name: 'Tiles', slug: 'tiles', icon: 'grid-view' },
+  { name: 'Paint', slug: 'paint', icon: 'format-paint' },
+  { name: 'Blocks', slug: 'blocks', icon: 'view-module' },
+];
 
 // Kept for the app session; moves to storage/backend later.
 let recentSearches: string[] = [];
 
-/** QR "buildlinka://product/p1" (or any link with /product/<id>) or a pack barcode → product id. */
-function resolveScan(data: string): string | null {
-  const link = data.match(/product\/([\w-]+)/);
-  if (link && PRODUCTS.some((p) => p.id === link[1])) return link[1];
-  return PRODUCTS.find((p) => p.barcode === data.trim())?.id ?? null;
+/** QR "buildlinka://product/<id>" (or any link with /product/<id>) → product id. */
+function resolveProductLink(data: string): string | null {
+  return data.match(/product\/([\w-]+)/)?.[1] ?? null;
 }
 
-type PhotoSearch = { uri: string; status: 'searching' | 'done' | 'unavailable' | 'error'; ids: string[] };
+type PhotoSearch = { uri: string; status: 'searching' | 'done' | 'unavailable' | 'error' };
 
-function ProductRow({ product, onPress, onAdd }: { product: Product; onPress: () => void; onAdd: () => void }) {
+function ProductRow({ product, onPress, onAdd }: { product: BackendProduct; onPress: () => void; onAdd: () => void }) {
+  const out = product.stock <= 0;
   return (
     <TouchableOpacity style={styles.row} onPress={onPress} activeOpacity={0.7}>
       <View style={styles.thumb}>
-        <Text style={styles.thumbEmoji}>{product.imageEmoji}</Text>
+        {product.photoUrls[0]
+          ? <ExpoImage source={{ uri: product.photoUrls[0] }} style={{ width: 52, height: 52, borderRadius: 8 }} contentFit="cover" />
+          : <Text style={styles.thumbEmoji}>📦</Text>}
       </View>
       <View style={styles.flex}>
         <Text style={styles.rowTitle} numberOfLines={1}>{product.name}</Text>
-        <Text style={styles.rowSub} numberOfLines={1}>{product.vendor}</Text>
+        <Text style={styles.rowSub} numberOfLines={1}>{product.storeName}</Text>
         <Text style={styles.rowPrice}>{formatPrice(product.price)}<Text style={styles.rowUnit}> /{product.unit}</Text></Text>
       </View>
-      <TouchableOpacity style={[styles.addBtn, !product.inStock && styles.addBtnOff]} onPress={onAdd} disabled={!product.inStock} accessibilityLabel={`Add ${product.name} to cart`}>
-        <MaterialIcons name={product.inStock ? 'add-shopping-cart' : 'remove-shopping-cart'} size={18} color={product.inStock ? Colors.onSecondary : Colors.outline} />
+      <TouchableOpacity style={[styles.addBtn, out && styles.addBtnOff]} onPress={onAdd} disabled={out} accessibilityLabel={`Add ${product.name} to cart`}>
+        <MaterialIcons name={out ? 'remove-shopping-cart' : 'add-shopping-cart'} size={18} color={out ? Colors.outline : Colors.onSecondary} />
       </TouchableOpacity>
     </TouchableOpacity>
   );
@@ -61,19 +73,14 @@ export default function SearchScreen() {
   const [scanning, setScanning] = useState(false);
   const [torch, setTorch] = useState(false);
   const [photo, setPhoto] = useState<PhotoSearch | null>(null);
+  const [pendingCode, setPendingCode] = useState<string | null>(null);
   const scanLock = useRef(false);
 
-  const q = query.trim().toLowerCase();
-  const results = useMemo(() => {
-    if (!q) return null;
-    const words = q.split(/\s+/);
-    const hit = (text: string) => words.every((w) => text.toLowerCase().includes(w));
-    return {
-      products: PRODUCTS.filter((p) => hit(`${p.name} ${p.category} ${p.vendor}`)),
-      workers: WORKERS.filter((w) => hit(`${w.name} ${w.trade} ${w.location} ${w.skills.join(' ')}`)),
-      categories: CATEGORIES.filter((c) => c.name !== 'More' && hit(c.name)),
-    };
-  }, [q]);
+  const q = query.trim();
+  const serverRows = useQuery(api.products.list, { search: q || undefined });
+  const barcodeHit = useQuery(api.products.byBarcode, pendingCode ? { code: pendingCode } : 'skip');
+  // Text typed → server results; empty box → the browse view below.
+  const results = q ? serverRows : null;
 
   const remember = (term: string) => {
     const t = term.trim();
@@ -100,19 +107,31 @@ export default function SearchScreen() {
     setScanning(true);
   };
 
+  // Barcode lookup resolves asynchronously against the backend.
+  useEffect(() => {
+    if (pendingCode === null || barcodeHit === undefined) return;
+    const code = pendingCode;
+    setPendingCode(null);
+    if (barcodeHit) {
+      router.push(`/product/${barcodeHit}` as any);
+    } else {
+      Alert.alert('No match yet', `We couldn't find a product for code ${code}.`, [
+        { text: 'Scan again', onPress: () => { openScanner(); } },
+        { text: 'OK', style: 'cancel' },
+      ]);
+    }
+  }, [pendingCode, barcodeHit]);
+
   const onScanned = ({ data }: BarcodeScanningResult) => {
     if (scanLock.current) return;
     scanLock.current = true;
-    const id = resolveScan(data);
     setScanning(false);
     setTorch(false);
-    if (id) {
-      router.push(`/product/${id}` as any);
+    const linkId = resolveProductLink(data);
+    if (linkId) {
+      router.push(`/product/${linkId}` as any);
     } else {
-      Alert.alert('No match yet', `We couldn't find a product for code ${data}.`, [
-        { text: 'Scan again', onPress: openScanner },
-        { text: 'OK', style: 'cancel' },
-      ]);
+      setPendingCode(data.trim());
     }
   };
 
@@ -123,14 +142,15 @@ export default function SearchScreen() {
     if (picked.canceled) return;
     const uri = picked.assets[0].uri;
     if (!imageSearchAvailable) {
-      setPhoto({ uri, status: 'unavailable', ids: [] });
+      setPhoto({ uri, status: 'unavailable' });
       return;
     }
-    setPhoto({ uri, status: 'searching', ids: [] });
+    setPhoto({ uri, status: 'searching' });
     try {
-      setPhoto({ uri, status: 'done', ids: await searchByImage(uri) });
+      await searchByImage(uri);
+      setPhoto({ uri, status: 'done' });
     } catch {
-      setPhoto({ uri, status: 'error', ids: [] });
+      setPhoto({ uri, status: 'error' });
     }
   };
 
@@ -146,15 +166,12 @@ export default function SearchScreen() {
     else if (params.mode === 'image') askPhotoSource();
   }, []);
 
-  const photoMatches = photo ? PRODUCTS.filter((p) => photo.ids.includes(p.id)) : [];
-  const total = results ? results.products.length + results.workers.length + results.categories.length : 0;
-
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
       <Stack.Screen options={{ headerShown: false }} />
 
       <View style={styles.topBar}>
-        <TouchableOpacity style={styles.iconBtn} onPress={() => router.back()} hitSlop={6} accessibilityLabel="Back">
+        <TouchableOpacity style={styles.iconBtn} onPress={() => goBackOrHome()} hitSlop={6} accessibilityLabel="Back">
           <MaterialIcons name="arrow-back" size={24} color={Colors.onSurface} />
         </TouchableOpacity>
         <View style={styles.searchBox}>
@@ -162,7 +179,7 @@ export default function SearchScreen() {
           <TextInput
             ref={inputRef}
             style={styles.searchInput}
-            placeholder="Materials, workers, categories…"
+            placeholder="Search cement, rods, tiles…"
             placeholderTextColor={Colors.outline}
             value={query}
             onChangeText={(t) => { setQuery(t); setPhoto(null); }}
@@ -194,16 +211,14 @@ export default function SearchScreen() {
               <Image source={{ uri: photo.uri }} style={styles.photo} />
               <View style={styles.flex}>
                 <Text style={styles.photoTitle}>
-                  {photo.status === 'searching' ? 'Looking for matches…' : photo.status === 'done' ? `${photoMatches.length} match${photoMatches.length !== 1 ? 'es' : ''}` : 'Photo search'}
+                  {photo.status === 'searching' ? 'Looking for matches…' : 'Photo search'}
                 </Text>
                 <Text style={styles.photoSub}>
                   {photo.status === 'unavailable'
                     ? "Photo matching isn't switched on yet. Tell us what it is:"
                     : photo.status === 'error'
                       ? "Couldn't reach photo search. Try again or pick a category:"
-                      : photo.status === 'done' && !photoMatches.length
-                        ? 'No similar products found. Pick a category:'
-                        : 'Matching your photo against our catalogue'}
+                      : 'Photo matching against the live catalogue is coming soon. Pick a category:'}
                 </Text>
               </View>
               {photo.status === 'searching' ? <ActivityIndicator color={Colors.primary} /> : (
@@ -212,11 +227,10 @@ export default function SearchScreen() {
                 </TouchableOpacity>
               )}
             </View>
-            {photoMatches.map((p) => <ProductRow key={p.id} product={p} onPress={() => openProduct(p.id)} onAdd={() => addItem(p)} />)}
-            {photo.status !== 'searching' && !photoMatches.length && (
+            {photo.status !== 'searching' && (
               <View style={styles.chips}>
-                {CATEGORIES.filter((c) => c.name !== 'More').map((c) => (
-                  <TouchableOpacity key={c.id} style={styles.chip} onPress={() => router.push(`/category/${categorySlug(c.name)}` as any)}>
+                {BROWSE.map((c) => (
+                  <TouchableOpacity key={c.slug} style={styles.chip} onPress={() => router.push(`/category/${c.slug}` as any)}>
                     <MaterialIcons name={c.icon as any} size={16} color={Colors.onSurfaceVariant} />
                     <Text style={styles.chipText}>{c.name}</Text>
                   </TouchableOpacity>
@@ -263,29 +277,24 @@ export default function SearchScreen() {
               </>
             )}
 
-            <Text style={[styles.sectionTitle, styles.sectionGap]}>Popular searches</Text>
-            <View style={styles.chips}>
-              {POPULAR.map((p) => (
-                <TouchableOpacity key={p} style={styles.chip} onPress={() => setQuery(p)}>
-                  <MaterialIcons name="trending-up" size={16} color={Colors.primary} />
-                  <Text style={styles.chipText}>{p}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-
             <Text style={[styles.sectionTitle, styles.sectionGap]}>Browse categories</Text>
             <View style={styles.catGrid}>
-              {CATEGORIES.filter((c) => c.name !== 'More').map((c) => (
-                <TouchableOpacity key={c.id} style={styles.cat} onPress={() => router.push(`/category/${categorySlug(c.name)}` as any)} activeOpacity={0.7}>
-                  <View style={[styles.catIcon, { backgroundColor: c.color + '1a' }]}>
-                    <MaterialIcons name={c.icon as any} size={22} color={c.color} />
+              {BROWSE.map((c) => (
+                <TouchableOpacity key={c.slug} style={styles.cat} onPress={() => router.push(`/category/${c.slug}` as any)} activeOpacity={0.7}>
+                  <View style={styles.catIcon}>
+                    <MaterialIcons name={c.icon as any} size={22} color={Colors.primary} />
                   </View>
                   <Text style={styles.catText} numberOfLines={1}>{c.name}</Text>
                 </TouchableOpacity>
               ))}
             </View>
           </>
-        ) : total === 0 ? (
+        ) : results === undefined ? (
+          <View style={styles.empty}>
+            <ActivityIndicator size="large" color={Colors.primary} />
+            <Text style={styles.emptySub}>Searching materials…</Text>
+          </View>
+        ) : results.length === 0 ? (
           <View style={styles.empty}>
             <MaterialIcons name="search-off" size={40} color={Colors.outline} />
             <Text style={styles.emptyTitle}>No results for “{query.trim()}”</Text>
@@ -297,59 +306,15 @@ export default function SearchScreen() {
           </View>
         ) : (
           <>
-            {results.categories.length > 0 && (
-              <View style={styles.chips}>
-                {results.categories.map((c) => (
-                  <TouchableOpacity key={c.id} style={styles.chip} onPress={() => { remember(query); router.push(`/category/${categorySlug(c.name)}` as any); }}>
-                    <MaterialIcons name={c.icon as any} size={16} color={Colors.onSurfaceVariant} />
-                    <Text style={styles.chipText}>{c.name}</Text>
-                    <MaterialIcons name="chevron-right" size={16} color={Colors.outline} />
-                  </TouchableOpacity>
-                ))}
-              </View>
-            )}
-
-            {results.products.length > 0 && (
-              <>
-                <View style={styles.sectionHead}>
-                  <Text style={styles.sectionTitle}>Materials · {results.products.length}</Text>
-                  <TouchableOpacity onPress={() => { remember(query); router.push({ pathname: '/(tabs)/materials', params: { q: query.trim() } } as any); }} hitSlop={8}>
-                    <Text style={styles.link}>See all</Text>
-                  </TouchableOpacity>
-                </View>
-                <View style={styles.card}>
-                  {results.products.slice(0, 5).map((p) => <ProductRow key={p.id} product={p} onPress={() => openProduct(p.id)} onAdd={() => addItem(p)} />)}
-                </View>
-              </>
-            )}
-
-            {results.workers.length > 0 && (
-              <>
-                <View style={styles.sectionHead}>
-                  <Text style={styles.sectionTitle}>Professionals · {results.workers.length}</Text>
-                  <TouchableOpacity onPress={() => { remember(query); router.push('/(tabs)/workers' as any); }} hitSlop={8}>
-                    <Text style={styles.link}>See all</Text>
-                  </TouchableOpacity>
-                </View>
-                <View style={styles.card}>
-                  {results.workers.slice(0, 4).map((w) => (
-                    <TouchableOpacity key={w.id} style={styles.row} onPress={() => { remember(query); router.push('/(tabs)/workers' as any); }} activeOpacity={0.7}>
-                      <View style={[styles.thumb, styles.thumbRound]}>
-                        <Text style={styles.thumbEmoji}>{w.avatar}</Text>
-                      </View>
-                      <View style={styles.flex}>
-                        <Text style={styles.rowTitle}>{w.name}</Text>
-                        <Text style={styles.rowSub}>{w.trade} · {w.location}</Text>
-                        <Text style={styles.rowPrice}>{formatPrice(w.dailyRate)}<Text style={styles.rowUnit}> /day</Text></Text>
-                      </View>
-                      <View style={[styles.availPill, !w.available && styles.busyPill]}>
-                        <Text style={[styles.availText, !w.available && styles.busyText]}>{w.available ? 'Available' : 'Busy'}</Text>
-                      </View>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              </>
-            )}
+            <View style={styles.sectionHead}>
+              <Text style={styles.sectionTitle}>Materials · {results.length}</Text>
+              <TouchableOpacity onPress={() => { remember(query); router.push({ pathname: '/(tabs)/materials', params: { q: query.trim() } } as any); }} hitSlop={8}>
+                <Text style={styles.link}>See all</Text>
+              </TouchableOpacity>
+            </View>
+            <View style={styles.card}>
+              {results.slice(0, 5).map((p) => <ProductRow key={p._id} product={p} onPress={() => openProduct(p._id)} onAdd={() => addItem(p)} />)}
+            </View>
           </>
         )}
       </ScrollView>
@@ -417,13 +382,12 @@ const styles = StyleSheet.create({
 
   catGrid: { flexDirection: 'row', flexWrap: 'wrap', rowGap: 16 },
   cat: { width: '25%', alignItems: 'center', gap: 6 },
-  catIcon: { width: 52, height: 52, borderRadius: 26, alignItems: 'center', justifyContent: 'center' },
+  catIcon: { width: 52, height: 52, borderRadius: 26, alignItems: 'center', justifyContent: 'center', backgroundColor: Colors.greenTint + '33' },
   catText: { fontSize: 12, fontWeight: '500', color: Colors.onSurface, paddingHorizontal: 2 },
 
   card: { backgroundColor: Colors.card, borderRadius: 8, paddingHorizontal: 12, marginBottom: 16, shadowColor: '#1b1c1c', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 1 },
   row: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: Colors.divider },
-  thumb: { width: 52, height: 52, borderRadius: 8, backgroundColor: Colors.surfaceVariant + '80', alignItems: 'center', justifyContent: 'center' },
-  thumbRound: { borderRadius: 26 },
+  thumb: { width: 52, height: 52, borderRadius: 8, backgroundColor: Colors.surfaceVariant + '80', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
   thumbEmoji: { fontSize: 26 },
   rowTitle: { fontSize: 15, fontWeight: '600', color: Colors.onSurface },
   rowSub: { fontSize: 13, color: Colors.outline, marginTop: 1 },
@@ -431,10 +395,6 @@ const styles = StyleSheet.create({
   rowUnit: { fontSize: 12, fontWeight: '400', color: Colors.outline },
   addBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: Colors.secondary, alignItems: 'center', justifyContent: 'center' },
   addBtnOff: { backgroundColor: Colors.surfaceVariant },
-  availPill: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999, backgroundColor: Colors.greenTint },
-  busyPill: { backgroundColor: Colors.surfaceVariant },
-  availText: { fontSize: 12, fontWeight: '600', color: Colors.primary },
-  busyText: { color: Colors.onSurfaceVariant },
 
   photoCard: { backgroundColor: Colors.card, borderRadius: 8, padding: 12, marginBottom: 16, borderLeftWidth: 4, borderLeftColor: Colors.secondary },
   photoHead: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 8 },

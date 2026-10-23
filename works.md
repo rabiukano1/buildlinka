@@ -86,7 +86,7 @@
 ### Theme & Data
 - [x] Green (#2E7D32) + Orange (#E65100) color palette
 - [x] Naira (₦) currency formatting
-- [x] Mock data: 12 categories, 8 products, 6 workers, 4 vendors
+- [x] Mock data removed: catalogue, stores, orders, workers, jobs, projects, reviews, saved items/locations, notifications, delivery, payments, support and admin are all served by the self-hosted Convex backend (https://build.view2earn.org)
 - [x] Nigerian location data (Lagos, Abuja, Port Harcourt, Kano)
 
 ---

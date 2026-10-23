@@ -2,10 +2,15 @@ import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { Colors } from '../constants/Colors';
-import type { Category } from '../constants/MockData';
+// Local Category-ish prop type (was constants/MockData).
+export type CategoryCardCategory = {
+  name: string;
+  icon: string;
+  color: string;
+};
 
 type Props = {
-  category: Category;
+  category: CategoryCardCategory;
   onPress?: () => void;
 };
 

@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef, useEffect } from 'react';
+import { Component, useState, useMemo, type ReactNode } from 'react';
 import {
   View,
   Text,
@@ -6,94 +6,110 @@ import {
   StyleSheet,
   TouchableOpacity,
   TextInput,
-  Animated,
+  ActivityIndicator,
   Platform,
   KeyboardAvoidingView,
+  Alert,
 } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
 import { MaterialIcons } from '@expo/vector-icons';
+import { useQuery, useMutation } from 'convex/react';
+import { api } from '../convex/_generated/api';
+import { formatPrice, errorMessage, type BackendProduct } from '../lib/backend';
 import { Colors } from '../constants/Colors';
 
-const formatPrice = (price: number) => '₦' + price.toLocaleString('en-NG');
+/** Shown when the signed-in user has no store yet (store queries throw then). */
+function NoStoreState() {
+  const router = useRouter();
+  return (
+    <View style={styles.centerWrap}>
+      <View style={styles.emptyIconWrap}>
+        <MaterialIcons name="store" size={36} color={Colors.primary} />
+      </View>
+      <Text style={styles.emptyTitle}>Create your store first</Text>
+      <Text style={styles.emptySubtitle}>
+        You need a vendor store before you can manage inventory.
+      </Text>
+      <TouchableOpacity
+        style={styles.primaryBtn}
+        onPress={() => router.push('/create-store' as any)}
+        activeOpacity={0.8}
+      >
+        <MaterialIcons name="add-business" size={18} color={Colors.onPrimary} />
+        <Text style={styles.primaryBtnText}>Create your store</Text>
+      </TouchableOpacity>
+    </View>
+  );
+}
 
-type InventoryItem = {
-  id: string;
-  title: string;
-  emoji: string;
-  category: string;
-  sku: string;
-  inStock: number;
-  minStock: number;
-  unit: string;
-  costPrice: number;
-  sellingPrice: number;
-  lastRestocked: string;
-};
+/** Catches the ConvexError thrown when the user has no store, so the
+ *  screen shows the create-store CTA instead of crashing. */
+class StoreErrorBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
+  state = { failed: false };
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+  render() {
+    if (this.state.failed) return <NoStoreState />;
+    return this.props.children;
+  }
+}
 
-const INITIAL_INVENTORY: InventoryItem[] = [
-  { id: 'inv-1', title: 'Dangote Cement 42.5R (50kg)', emoji: '🏗️', category: 'Cement', sku: 'DGT-CMT-001', inStock: 48, minStock: 20, unit: 'bag', costPrice: 6200, sellingPrice: 8500, lastRestocked: '2 Jun 2026' },
-  { id: 'inv-2', title: 'Elephant Cement (50kg)', emoji: '🏗️', category: 'Cement', sku: 'ELP-CMT-002', inStock: 12, minStock: 15, unit: 'bag', costPrice: 5900, sellingPrice: 8200, lastRestocked: '28 May 2026' },
-  { id: 'inv-3', title: 'Iron Rod 12mm (6m)', emoji: '⚙️', category: 'Steel & Iron', sku: 'STL-IRD-003', inStock: 25, minStock: 10, unit: 'piece', costPrice: 5000, sellingPrice: 6800, lastRestocked: '25 May 2026' },
-  { id: 'inv-4', title: 'Iron Rod 16mm (6m)', emoji: '⚙️', category: 'Steel & Iron', sku: 'STL-IRD-004', inStock: 8, minStock: 10, unit: 'piece', costPrice: 7200, sellingPrice: 9500, lastRestocked: '20 May 2026' },
-  { id: 'inv-5', title: 'Ceramic Floor Tiles 60x60cm', emoji: '🏛️', category: 'Tiles', sku: 'TLW-TLE-005', inStock: 85, minStock: 30, unit: 'box', costPrice: 2200, sellingPrice: 3500, lastRestocked: '15 May 2026' },
-  { id: 'inv-6', title: 'Aluminum Roofing Sheet 0.5mm', emoji: '🏠', category: 'Roofing', sku: 'ROF-SHT-006', inStock: 18, minStock: 10, unit: 'sheet', costPrice: 3100, sellingPrice: 4200, lastRestocked: '10 May 2026' },
-  { id: 'inv-7', title: 'PVC Water Pipe 3/4 inch (9m)', emoji: '🔧', category: 'Plumbing', sku: 'PLB-PVC-007', inStock: 3, minStock: 15, unit: 'piece', costPrice: 1900, sellingPrice: 2800, lastRestocked: '5 May 2026' },
-  { id: 'inv-8', title: 'Emulsion Paint 20L (White)', emoji: '🎨', category: 'Paint', sku: 'PNT-EMS-008', inStock: 14, minStock: 10, unit: 'bucket', costPrice: 9000, sellingPrice: 12500, lastRestocked: '20 Apr 2026' },
-];
+type MineProduct = BackendProduct & { costPrice: number | null; minStock: number };
 
 function InventoryCard({
   item,
-  onUpdateStock,
+  onAdjust,
 }: {
-  item: InventoryItem;
-  onUpdateStock: (id: string, delta: number) => void;
+  item: MineProduct;
+  onAdjust: (id: string, delta: number) => void;
 }) {
-  const isLow = item.inStock <= item.minStock;
-  const isOut = item.inStock === 0;
+  const isLow = item.stock <= item.minStock;
+  const isOut = item.stock === 0;
   const stockStatus = isOut ? 'Out of Stock' : isLow ? 'Low Stock' : 'In Stock';
   const statusColor = isOut ? Colors.error : isLow ? Colors.warning : Colors.success;
-  const stockRatio = Math.min(item.inStock / item.minStock, 2);
+  const stockRatio = Math.min(item.stock / Math.max(item.minStock, 1), 2);
   const barWidth = Math.min((stockRatio / 2) * 100, 100);
-  const barColor = isOut ? Colors.error : isLow ? Colors.warning : Colors.success;
+  const margin = item.costPrice ? Math.round(((item.price - item.costPrice) / item.costPrice) * 100) : null;
 
   return (
     <View style={[styles.invCard, isLow && styles.invCardLow]}>
       <View style={styles.invCardLeft}>
         <View style={styles.invEmojiBadge}>
-          <Text style={styles.invEmoji}>{item.emoji}</Text>
+          <Text style={styles.invEmoji}>📦</Text>
         </View>
       </View>
       <View style={styles.invCardBody}>
         <View style={styles.invCardTop}>
           <View style={styles.invTitleArea}>
-            <Text style={styles.invTitle} numberOfLines={1}>{item.title}</Text>
-            <Text style={styles.invSku}>{item.sku}</Text>
+            <Text style={styles.invTitle} numberOfLines={1}>{item.name}</Text>
+            {!!item.barcode && <Text style={styles.invSku}>{item.barcode}</Text>}
           </View>
           <View style={[styles.statusBadge, { backgroundColor: statusColor + '15' }]}>
             <View style={[styles.statusDot, { backgroundColor: statusColor }]} />
             <Text style={[styles.statusText, { color: statusColor }]}>{stockStatus}</Text>
           </View>
         </View>
-        <Text style={styles.invCategory}>{item.category}</Text>
+        <Text style={styles.invCategory}>{item.category} · {item.status}</Text>
         <View style={styles.stockBarTrack}>
-          <View style={[styles.stockBarFill, { width: `${barWidth}%`, backgroundColor: barColor }]} />
+          <View style={[styles.stockBarFill, { width: `${barWidth}%`, backgroundColor: statusColor }]} />
         </View>
         <View style={styles.invMetrics}>
           <View style={styles.invMetric}>
             <Text style={styles.invMetricLabel}>In Stock</Text>
             <Text style={[styles.invMetricValue, isLow && { color: statusColor }]}>
-              {item.inStock}
+              {item.stock}
               <Text style={styles.invMetricUnit}> / {item.minStock}</Text>
             </Text>
           </View>
           <View style={styles.invMetric}>
             <Text style={styles.invMetricLabel}>Selling Price</Text>
-            <Text style={styles.invMetricValue}>{formatPrice(item.sellingPrice)}</Text>
+            <Text style={styles.invMetricValue}>{formatPrice(item.price)}</Text>
           </View>
           <View style={styles.invMetric}>
             <Text style={styles.invMetricLabel}>Margin</Text>
             <Text style={[styles.invMetricValue, { color: Colors.success }]}>
-              {Math.round(((item.sellingPrice - item.costPrice) / item.costPrice) * 100)}%
+              {margin === null ? '—' : `${margin}%`}
             </Text>
           </View>
         </View>
@@ -101,139 +117,177 @@ function InventoryCard({
           <View style={styles.qtyControls}>
             <TouchableOpacity
               style={styles.qtyBtn}
-              onPress={() => onUpdateStock(item.id, -1)}
+              onPress={() => onAdjust(item._id as never, -1)}
+              accessibilityLabel="Decrease stock"
             >
               <MaterialIcons name="remove" size={14} color={Colors.textMedium} />
             </TouchableOpacity>
-            <Text style={styles.qtyValue}>{item.inStock}</Text>
+            <Text style={styles.qtyValue}>{item.stock}</Text>
             <TouchableOpacity
               style={styles.qtyBtn}
-              onPress={() => onUpdateStock(item.id, 1)}
+              onPress={() => onAdjust(item._id as never, 1)}
+              accessibilityLabel="Increase stock"
             >
               <MaterialIcons name="add" size={14} color={Colors.textMedium} />
             </TouchableOpacity>
           </View>
-          <View style={styles.quickEditBtns}>
-            <TouchableOpacity style={styles.editBtn}>
-              <MaterialIcons name="edit" size={15} color={Colors.primaryGreen} />
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.editBtn}>
-              <MaterialIcons name="restart-alt" size={15} color={Colors.primaryGreen} />
-            </TouchableOpacity>
-          </View>
+          <Text style={styles.invDate}>per {item.unit}</Text>
         </View>
-        <Text style={styles.invDate}>Last restocked: {item.lastRestocked}</Text>
       </View>
     </View>
   );
 }
 
-export default function MyInventoryScreen() {
-  const router = useRouter();
-  const [inventory, setInventory] = useState<InventoryItem[]>(INITIAL_INVENTORY);
+function InventoryBody() {
   const [searchQuery, setSearchQuery] = useState('');
-
-  const lowStockItems = useMemo(() => inventory.filter((i) => i.inStock <= i.minStock), [inventory]);
+  const products = useQuery(api.products.mine, {});
+  const adjustStock = useMutation(api.products.adjustStock);
 
   const filteredInventory = useMemo(() => {
-    if (!searchQuery.trim()) return inventory;
+    if (!products) return [];
+    if (!searchQuery.trim()) return products;
     const q = searchQuery.toLowerCase();
-    return inventory.filter(
+    return products.filter(
       (i) =>
-        i.title.toLowerCase().includes(q) ||
+        i.name.toLowerCase().includes(q) ||
         i.category.toLowerCase().includes(q) ||
-        i.sku.toLowerCase().includes(q)
+        (i.barcode ?? '').toLowerCase().includes(q)
     );
-  }, [inventory, searchQuery]);
+  }, [products, searchQuery]);
 
   const kpis = useMemo(() => {
-    const totalUnits = inventory.reduce((s, i) => s + i.inStock, 0);
-    const totalValue = inventory.reduce((s, i) => s + i.sellingPrice * i.inStock, 0);
-    return { totalUnits, lowStock: lowStockItems.length, totalValue };
-  }, [inventory, lowStockItems]);
+    const list = products ?? [];
+    const totalUnits = list.reduce((s, i) => s + i.stock, 0);
+    const totalValue = list.reduce((s, i) => s + i.price * i.stock, 0);
+    const lowStock = list.filter((i) => i.stock <= i.minStock).length;
+    return { totalUnits, lowStock, totalValue };
+  }, [products]);
 
-  const handleUpdateStock = (id: string, delta: number) => {
-    setInventory((prev) =>
-      prev.map((i) =>
-        i.id === id ? { ...i, inStock: Math.max(0, i.inStock + delta) } : i
-      )
-    );
+  const handleAdjust = async (id: string, delta: number) => {
+    try {
+      await adjustStock({ id: id as never, delta });
+    } catch (e) {
+      Alert.alert('Could not update stock', errorMessage(e));
+    }
   };
 
-  const renderHeader = () => (
-    <View>
-      <View style={styles.kpiRow}>
-        <View style={[styles.kpiCard, { borderLeftColor: Colors.primary }]}>
-          <Text style={styles.kpiValue}>{kpis.totalUnits}</Text>
-          <Text style={styles.kpiLabel}>Total Stock</Text>
+  if (products === undefined) {
+    return (
+      <View style={styles.centerWrap}>
+        <ActivityIndicator size="large" color={Colors.primary} />
+        <Text style={styles.emptySubtitle}>Loading your inventory…</Text>
+      </View>
+    );
+  }
+
+  return (
+    <FlatList
+      data={filteredInventory}
+      keyExtractor={(item) => item._id}
+      renderItem={({ item }) => (
+        <InventoryCard item={item as MineProduct} onAdjust={handleAdjust} />
+      )}
+      ListHeaderComponent={
+        <View>
+          <View style={styles.kpiRow}>
+            <View style={[styles.kpiCard, { borderLeftColor: Colors.primary }]}>
+              <Text style={styles.kpiValue}>{kpis.totalUnits}</Text>
+              <Text style={styles.kpiLabel}>Total Stock</Text>
+            </View>
+            <View style={[styles.kpiCard, { borderLeftColor: kpis.lowStock > 0 ? Colors.warning : Colors.success }]}>
+              <Text style={[styles.kpiValue, { color: kpis.lowStock > 0 ? Colors.warning : Colors.success }]}>
+                {kpis.lowStock}
+              </Text>
+              <Text style={styles.kpiLabel}>Low Stock Items</Text>
+            </View>
+            <View style={[styles.kpiCard, { borderLeftColor: Colors.secondary }]}>
+              <Text style={styles.kpiValue}>{formatPrice(kpis.totalValue)}</Text>
+              <Text style={styles.kpiLabel}>Total Value</Text>
+            </View>
+          </View>
+
+          <View style={styles.searchRow}>
+            <MaterialIcons name="search" size={18} color={Colors.textLight} />
+            <TextInput
+              style={styles.searchInput}
+              placeholder="Search by name, category, or barcode..."
+              placeholderTextColor={Colors.textMuted}
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+            />
+            {searchQuery.length > 0 && (
+              <TouchableOpacity onPress={() => setSearchQuery('')}>
+                <MaterialIcons name="close" size={16} color={Colors.textLight} />
+              </TouchableOpacity>
+            )}
+          </View>
+
+          <View style={styles.sectionRow}>
+            <Text style={styles.sectionLabel}>All Products</Text>
+            <View style={styles.sectionCount}>
+              <Text style={styles.sectionCountText}>{filteredInventory.length} items</Text>
+            </View>
+          </View>
         </View>
-        <View style={[styles.kpiCard, { borderLeftColor: lowStockItems.length > 0 ? Colors.warning : Colors.success }]}>
-          <Text style={[styles.kpiValue, { color: lowStockItems.length > 0 ? Colors.warning : Colors.success }]}>
-            {kpis.lowStock}
+      }
+      ListHeaderComponentStyle={styles.listHeader}
+      contentContainerStyle={styles.listContent}
+      showsVerticalScrollIndicator={false}
+      ListEmptyComponent={
+        <View style={styles.empty}>
+          <MaterialIcons name="inventory" size={48} color={Colors.border} />
+          <Text style={styles.emptyTitle}>{searchQuery ? 'No items found' : 'No products yet'}</Text>
+          <Text style={styles.emptySubtitle}>
+            {searchQuery ? 'Try a different search term' : 'Add your first listing to start tracking inventory.'}
           </Text>
-          <Text style={styles.kpiLabel}>Low Stock Items</Text>
         </View>
-        <View style={[styles.kpiCard, { borderLeftColor: Colors.secondary }]}>
-          <Text style={styles.kpiValue}>{formatPrice(kpis.totalValue)}</Text>
-          <Text style={styles.kpiLabel}>Total Value</Text>
-        </View>
-      </View>
-
-      <View style={styles.searchRow}>
-        <MaterialIcons name="search" size={18} color={Colors.textLight} />
-        <TextInput
-          style={styles.searchInput}
-          placeholder="Search by name, category, or SKU..."
-          placeholderTextColor={Colors.textMuted}
-          value={searchQuery}
-          onChangeText={setSearchQuery}
-        />
-        {searchQuery.length > 0 && (
-          <TouchableOpacity onPress={() => setSearchQuery('')}>
-            <MaterialIcons name="close" size={16} color={Colors.textLight} />
-          </TouchableOpacity>
-        )}
-      </View>
-
-      <View style={styles.sectionRow}>
-        <Text style={styles.sectionLabel}>All Products</Text>
-        <View style={styles.sectionCount}>
-          <Text style={styles.sectionCountText}>{filteredInventory.length} items</Text>
-        </View>
-      </View>
-    </View>
+      }
+    />
   );
+}
+
+export default function MyInventoryScreen() {
+  const me = useQuery(api.users.me);
+
+  if (me === undefined) {
+    return (
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={Platform.OS === 'ios' ? 120 : 0}>
+        <View style={styles.container}>
+          <Stack.Screen
+            options={{
+              headerShown: true,
+              headerTitle: 'My Inventory',
+              headerBackTitle: 'Back',
+              headerTintColor: Colors.primary,
+            }}
+          />
+          <View style={styles.centerWrap}>
+            <ActivityIndicator size="large" color={Colors.primary} />
+          </View>
+        </View>
+      </KeyboardAvoidingView>
+    );
+  }
 
   return (
     <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={Platform.OS === 'ios' ? 120 : 0}>
-    <View style={styles.container}>
-      <Stack.Screen
-        options={{
-          headerShown: true,
-          headerTitle: 'My Inventory',
-          headerBackTitle: 'Back',
-          headerTintColor: Colors.primary,
-        }}
-      />
-      <FlatList
-        data={filteredInventory}
-        keyExtractor={(item) => item.id}
-        renderItem={({ item }) => (
-          <InventoryCard item={item} onUpdateStock={handleUpdateStock} />
+      <View style={styles.container}>
+        <Stack.Screen
+          options={{
+            headerShown: true,
+            headerTitle: 'My Inventory',
+            headerBackTitle: 'Back',
+            headerTintColor: Colors.primary,
+          }}
+        />
+        {!me?.store ? (
+          <NoStoreState />
+        ) : (
+          <StoreErrorBoundary>
+            <InventoryBody />
+          </StoreErrorBoundary>
         )}
-        ListHeaderComponent={renderHeader}
-        ListHeaderComponentStyle={styles.listHeader}
-        contentContainerStyle={styles.listContent}
-        showsVerticalScrollIndicator={false}
-        ListEmptyComponent={
-          <View style={styles.empty}>
-            <MaterialIcons name="inventory" size={48} color={Colors.border} />
-            <Text style={styles.emptyTitle}>No items found</Text>
-            <Text style={styles.emptySubtitle}>Try a different search term</Text>
-          </View>
-        }
-      />
-    </View>
+      </View>
     </KeyboardAvoidingView>
   );
 }
@@ -250,6 +304,13 @@ const styles = StyleSheet.create({
     padding: 16,
     paddingBottom: 32,
     flexGrow: 1,
+  },
+  centerWrap: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 32,
+    gap: 8,
   },
 
   /* ─── KPI Row ─── */
@@ -465,18 +526,6 @@ const styles = StyleSheet.create({
     minWidth: 18,
     textAlign: 'center',
   },
-  quickEditBtns: {
-    flexDirection: 'row',
-    gap: 6,
-  },
-  editBtn: {
-    width: 30,
-    height: 30,
-    borderRadius: 99,
-    backgroundColor: Colors.primaryGreen + '10',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
   invDate: {
     fontSize: 9.5,
     color: Colors.textLight,
@@ -490,13 +539,19 @@ const styles = StyleSheet.create({
     paddingTop: 60,
     gap: 8,
   },
+  emptyIconWrap: { width: 72, height: 72, borderRadius: 36, backgroundColor: Colors.greenTint + '80', alignItems: 'center', justifyContent: 'center', marginBottom: 4 },
   emptyTitle: {
     fontSize: 15,
     fontWeight: '700',
     color: Colors.textDark,
+    textAlign: 'center',
   },
   emptySubtitle: {
     fontSize: 12,
     color: Colors.textLight,
+    textAlign: 'center',
+    paddingHorizontal: 24,
   },
+  primaryBtn: { flexDirection: 'row', alignItems: 'center', gap: 8, height: 48, paddingHorizontal: 24, borderRadius: 999, backgroundColor: Colors.primary, marginTop: 8 },
+  primaryBtnText: { fontSize: 15, fontWeight: '700', color: Colors.onPrimary },
 });

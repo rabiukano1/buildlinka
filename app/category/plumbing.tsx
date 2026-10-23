@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { PRODUCTS } from '../../constants/MockData';
+import { useQuery } from 'convex/react';
+import { api } from '../../convex/_generated/api';
 import CategoryShell, { EmptyResult, Footnote, Label, ModeTabs, Notice, OrderLine, Result, Row, Stepper, Wrap, numeric } from '../../components/CategoryShell';
 import { Chip, Field } from '../../components/EngineerUI';
 import { pipes, waterTank } from '../../lib/estimators';
@@ -20,7 +21,8 @@ export default function PlumbingScreen() {
   const [usage, setUsage] = useState(100);
   const [days, setDays] = useState(2);
 
-  const product = PRODUCTS.find((p) => p.category === 'Plumbing' && /pipe/i.test(p.name));
+  const plumbingProducts = useQuery(api.products.list, { category: 'Plumbing' }) ?? [];
+  const product = plumbingProducts.find((p) => /pipe/i.test(p.name));
   const pipeLen = product ? stockLength(product.name) : 6;
   const pipe = pipes(parseFloat(run), pipeLen, allowance);
   const tank = waterTank(people, usage, days);

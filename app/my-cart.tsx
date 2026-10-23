@@ -9,19 +9,21 @@ import {
 } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
 import { MaterialIcons } from '@expo/vector-icons';
+import { Image } from 'expo-image';
+import { useQuery } from 'convex/react';
+import { api } from '../convex/_generated/api';
 import { Colors } from '../constants/Colors';
-import { PRODUCTS } from '../constants/MockData';
 import { useCart } from '../contexts/CartContext';
-
-const formatPrice = (price: number) => '₦' + price.toLocaleString('en-NG');
+import { formatPrice } from '../lib/backend';
 
 export default function MyCartScreen() {
   const router = useRouter();
   const { items, totalItems, totalPrice, addItem, updateQuantity, removeItem, clearCart } = useCart();
 
+  const catalogue = useQuery(api.products.list, {});
   const recommended = useMemo(
-    () => PRODUCTS.filter((p) => !items.some((i) => i.product.id === p.id)),
-    [items]
+    () => (catalogue ?? []).filter((p) => !items.some((i) => i.product._id === p._id)).slice(0, 10),
+    [catalogue, items]
   );
 
   if (items.length === 0) {
@@ -65,17 +67,24 @@ export default function MyCartScreen() {
       />
       <FlatList
         data={items}
-        keyExtractor={(item) => item.product.id}
+        keyExtractor={(item) => item.product._id}
         contentContainerStyle={styles.list}
         showsVerticalScrollIndicator={false}
         renderItem={({ item }) => (
           <View style={styles.cartItem}>
             <View style={styles.itemThumb}>
-              <Text style={styles.itemEmoji}>{item.product.imageEmoji}</Text>
+              {item.product.photoUrls[0] ? (
+                <Image source={{ uri: item.product.photoUrls[0] }} style={{ width: 60, height: 60, borderRadius: 8 }} contentFit="cover" />
+              ) : (
+                <Text style={styles.itemEmoji}>📦</Text>
+              )}
             </View>
             <View style={styles.itemInfo}>
               <Text style={styles.itemName} numberOfLines={2}>{item.product.name}</Text>
-              <Text style={styles.itemVendor}>{item.product.vendor}</Text>
+              <View style={styles.vendorRow}>
+                <Text style={styles.itemVendor} numberOfLines={1}>{item.product.storeName}</Text>
+                {item.product.storeVerified && <MaterialIcons name="verified" size={12} color={Colors.primary} />}
+              </View>
               <Text style={styles.itemUnit}>Per {item.product.unit}</Text>
               <View style={styles.itemBottom}>
                 <Text style={styles.itemPrice}>
@@ -84,14 +93,14 @@ export default function MyCartScreen() {
                 <View style={styles.qtyRow}>
                   <TouchableOpacity
                     style={styles.qtyBtn}
-                    onPress={() => updateQuantity(item.product.id, item.quantity - 1)}
+                    onPress={() => updateQuantity(item.product._id, item.quantity - 1)}
                   >
                     <MaterialIcons name="remove" size={16} color={Colors.textDark} />
                   </TouchableOpacity>
                   <Text style={styles.qtyValue}>{item.quantity}</Text>
                   <TouchableOpacity
                     style={styles.qtyBtn}
-                    onPress={() => updateQuantity(item.product.id, item.quantity + 1)}
+                    onPress={() => updateQuantity(item.product._id, item.quantity + 1)}
                   >
                     <MaterialIcons name="add" size={16} color={Colors.textDark} />
                   </TouchableOpacity>
@@ -103,7 +112,7 @@ export default function MyCartScreen() {
               <Text style={styles.unitPriceLabel}>/ {item.product.unit}</Text>
               <TouchableOpacity
                 style={styles.deleteBtn}
-                onPress={() => removeItem(item.product.id)}
+                onPress={() => removeItem(item.product._id)}
               >
                 <MaterialIcons name="delete-outline" size={18} color={Colors.error} />
               </TouchableOpacity>
@@ -149,16 +158,20 @@ export default function MyCartScreen() {
                 >
                   {recommended.map((product) => (
                     <TouchableOpacity
-                      key={product.id}
+                      key={product._id}
                       style={styles.recoCard}
                       activeOpacity={0.8}
-                      onPress={() => router.push(`/product/${product.id}` as any)}
+                      onPress={() => router.push(`/product/${product._id}` as any)}
                     >
                       <View style={styles.recoEmoji}>
-                        <Text style={styles.recoEmojiText}>{product.imageEmoji}</Text>
+                        {product.photoUrls[0] ? (
+                          <Image source={{ uri: product.photoUrls[0] }} style={{ width: '100%', height: '100%' }} contentFit="cover" />
+                        ) : (
+                          <Text style={styles.recoEmojiText}>📦</Text>
+                        )}
                       </View>
                       <Text style={styles.recoName} numberOfLines={2}>{product.name}</Text>
-                      <Text style={styles.recoVendor} numberOfLines={1}>{product.vendor}</Text>
+                      <Text style={styles.recoVendor} numberOfLines={1}>{product.storeName}</Text>
                       <View style={styles.recoBottom}>
                         <Text style={styles.recoPrice}>{formatPrice(product.price)}</Text>
                         <TouchableOpacity
@@ -253,6 +266,7 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.surfaceVariant,
     alignItems: 'center',
     justifyContent: 'center',
+    overflow: 'hidden',
   },
   itemEmoji: { fontSize: 28 },
   itemInfo: {
@@ -265,9 +279,15 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: Colors.textDark,
   },
+  vendorRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+  },
   itemVendor: {
     fontSize: 11,
     color: Colors.textMedium,
+    flexShrink: 1,
   },
   itemUnit: {
     fontSize: 11,
@@ -431,6 +451,7 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.surfaceVariant,
     alignItems: 'center',
     justifyContent: 'center',
+    overflow: 'hidden',
   },
   recoEmojiText: { fontSize: 36 },
   recoName: {

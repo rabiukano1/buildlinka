@@ -1,63 +1,21 @@
 import { useState, useMemo, useRef, useEffect } from 'react';
 import {
   View, Text, FlatList, ScrollView, StyleSheet, TouchableOpacity, Alert,
-  TextInput, Modal, Animated, KeyboardAvoidingView, Platform,
+  TextInput, Modal, Animated, KeyboardAvoidingView, Platform, ActivityIndicator,
 } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
 import { MaterialIcons } from '@expo/vector-icons';
+import { Image } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useMutation, useQuery } from 'convex/react';
+import { api } from '../convex/_generated/api';
+import type { Id } from '../convex/_generated/dataModel';
 import { Colors } from '../constants/Colors';
-import { PRODUCTS } from '../constants/MockData';
+import { errorMessage, formatPrice, type BackendProduct } from '../lib/backend';
+
+type VendorProduct = BackendProduct & { costPrice: number | null; minStock: number };
 
 type ListingStatus = 'active' | 'draft' | 'sold';
-
-type Listing = {
-  id: string;
-  title: string;
-  emoji: string;
-  price: number;
-  quantity: number;
-  unit: string;
-  views: number;
-  inquiries: number;
-  date: string;
-  status: ListingStatus;
-};
-
-const MY_LISTINGS: Listing[] = [
-  { id: 'LST-001', title: 'Dangote Cement 42.5R (50kg)', emoji: '🏗️', price: 8500, quantity: 50, unit: 'bag', views: 234, inquiries: 12, date: '2 Jun 2026', status: 'active' },
-  { id: 'LST-002', title: 'Iron Rod 12mm (6m)', emoji: '⚙️', price: 6800, quantity: 30, unit: 'piece', views: 189, inquiries: 8, date: '28 May 2026', status: 'active' },
-  { id: 'LST-003', title: 'Ceramic Floor Tiles 60×60cm', emoji: '🏛️', price: 3500, quantity: 100, unit: 'box', views: 145, inquiries: 5, date: '15 May 2026', status: 'active' },
-  { id: 'LST-004', title: 'Aluminum Roofing Sheet 0.5mm', emoji: '🏠', price: 4200, quantity: 20, unit: 'sheet', views: 78, inquiries: 3, date: '10 May 2026', status: 'draft' },
-  { id: 'LST-005', title: 'PVC Water Pipe 3/4 inch (9m)', emoji: '🔧', price: 2800, quantity: 40, unit: 'piece', views: 312, inquiries: 15, date: '5 May 2026', status: 'sold' },
-  { id: 'LST-006', title: 'Sandcrete Block (9 inches)', emoji: '🧱', price: 400, quantity: 200, unit: 'block', views: 567, inquiries: 22, date: '28 Apr 2026', status: 'active' },
-  { id: 'LST-007', title: 'Emulsion Paint 20L (White)', emoji: '🎨', price: 12500, quantity: 15, unit: 'bucket', views: 95, inquiries: 4, date: '20 Apr 2026', status: 'draft' },
-  { id: 'LST-008', title: 'Wooden Door (Solid Teak)', emoji: '🚪', price: 45000, quantity: 5, unit: 'piece', views: 203, inquiries: 9, date: '10 Apr 2026', status: 'sold' },
-];
-
-type InventoryItem = {
-  id: string;
-  title: string;
-  emoji: string;
-  category: string;
-  inStock: number;
-  minStock: number;
-  unit: string;
-  costPrice: number;
-  sellingPrice: number;
-  lastRestocked: string;
-};
-
-const INITIAL_INVENTORY: InventoryItem[] = [
-  { id: 'inv-1', title: 'Dangote Cement 42.5R (50kg)', emoji: '🏗️', category: 'Cement', inStock: 48, minStock: 20, unit: 'bag', costPrice: 6200, sellingPrice: 8500, lastRestocked: '2 Jun 2026' },
-  { id: 'inv-2', title: 'Elephant Cement (50kg)', emoji: '🏗️', category: 'Cement', inStock: 12, minStock: 15, unit: 'bag', costPrice: 5900, sellingPrice: 8200, lastRestocked: '28 May 2026' },
-  { id: 'inv-3', title: 'Iron Rod 12mm (6m)', emoji: '⚙️', category: 'Steel & Iron', inStock: 25, minStock: 10, unit: 'piece', costPrice: 5000, sellingPrice: 6800, lastRestocked: '25 May 2026' },
-  { id: 'inv-4', title: 'Iron Rod 16mm (6m)', emoji: '⚙️', category: 'Steel & Iron', inStock: 8, minStock: 10, unit: 'piece', costPrice: 7200, sellingPrice: 9500, lastRestocked: '20 May 2026' },
-  { id: 'inv-5', title: 'Ceramic Floor Tiles 60×60cm', emoji: '🏛️', category: 'Tiles', inStock: 85, minStock: 30, unit: 'box', costPrice: 2200, sellingPrice: 3500, lastRestocked: '15 May 2026' },
-  { id: 'inv-6', title: 'Aluminum Roofing Sheet 0.5mm', emoji: '🏠', category: 'Roofing', inStock: 18, minStock: 10, unit: 'sheet', costPrice: 3100, sellingPrice: 4200, lastRestocked: '10 May 2026' },
-  { id: 'inv-7', title: 'PVC Water Pipe 3/4 inch (9m)', emoji: '🔧', category: 'Plumbing', inStock: 3, minStock: 15, unit: 'piece', costPrice: 1900, sellingPrice: 2800, lastRestocked: '5 May 2026' },
-  { id: 'inv-8', title: 'Emulsion Paint 20L (White)', emoji: '🎨', category: 'Paint', inStock: 14, minStock: 10, unit: 'bucket', costPrice: 9000, sellingPrice: 12500, lastRestocked: '20 Apr 2026' },
-];
 
 const TABS = [
   { key: 'listings', icon: 'storefront', label: 'Listings' },
@@ -70,20 +28,20 @@ const STATUS_META: Record<ListingStatus, { label: string; color: string; bg: str
   sold: { label: 'Sold', color: Colors.secondary, bg: Colors.orangeTint },
 };
 
-const CATEGORIES = Array.from(new Set(PRODUCTS.map((p) => p.category)));
+// Same values as the backend CATEGORIES list (convex/products.ts).
+const CATEGORIES = ['Cement', 'Steel & Iron', 'Roofing', 'Electrical', 'Plumbing', 'Tiles', 'Timber', 'Equipment', 'Glass', 'Paint', 'Blocks'];
 const QUICK_RESTOCK = [10, 25, 50, 100];
 
-const stockStatus = (i: InventoryItem) =>
-  i.inStock === 0
+const stockStatus = (stock: number, minStock: number) =>
+  stock === 0
     ? { key: 'out', label: 'Out of stock', color: Colors.outline, bg: Colors.surfaceVariant }
-    : i.inStock <= i.minStock
+    : stock <= minStock
       ? { key: 'low', label: 'Low stock', color: Colors.error, bg: '#ffdad6' }
       : { key: 'ok', label: 'In stock', color: Colors.primary, bg: Colors.greenTint };
 
-const todaysDate = () =>
-  new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }).replace(/,/g, '');
+const listedDate = (createdAt: number) =>
+  new Date(createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }).replace(/,/g, '');
 
-const formatPrice = (price: number) => '₦' + price.toLocaleString('en-NG');
 const compact = (n: number) => (n >= 1e6 ? `₦${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `₦${Math.round(n / 1e3)}K` : formatPrice(n));
 
 function FadeIn({ index, children }: { index: number; children: React.ReactNode }) {
@@ -151,18 +109,23 @@ function Sheet({ visible, title, onClose, children }: { visible: boolean; title:
   );
 }
 
-function ListingCard({ item, onAdvance, onDelete }: { item: Listing; onAdvance: (l: Listing) => void; onDelete: (l: Listing) => void }) {
+function ProductThumb({ uri }: { uri?: string }) {
+  if (uri) return <Image source={{ uri }} style={{ width: 56, height: 56, borderRadius: 8 }} contentFit="cover" />;
+  return <Text style={styles.emoji}>📦</Text>;
+}
+
+function ListingCard({ item, onAdvance, onDelete }: { item: VendorProduct; onAdvance: (p: VendorProduct) => void; onDelete: (p: VendorProduct) => void }) {
   const meta = STATUS_META[item.status];
   const nextAction = item.status === 'draft' ? { icon: 'publish', label: 'Publish' } : item.status === 'active' ? { icon: 'sell', label: 'Mark sold' } : null;
   return (
     <View style={[styles.card, { borderLeftColor: meta.color }]}>
       <View style={styles.cardRow}>
         <View style={styles.emojiTile}>
-          <Text style={styles.emoji}>{item.emoji}</Text>
+          <ProductThumb uri={item.photoUrls[0]} />
         </View>
         <View style={styles.cardBody}>
           <View style={styles.cardTopRow}>
-            <Text style={styles.cardTitle} numberOfLines={2}>{item.title}</Text>
+            <Text style={styles.cardTitle} numberOfLines={2}>{item.name}</Text>
             <Pill {...meta} />
           </View>
           <Text style={styles.cardPrice}>
@@ -174,20 +137,16 @@ function ListingCard({ item, onAdvance, onDelete }: { item: Listing; onAdvance: 
       <View style={styles.metaRow}>
         <View style={styles.metaItem}>
           <MaterialIcons name="inventory-2" size={14} color={Colors.outline} />
-          <Text style={styles.metaText}>{item.quantity} in stock</Text>
+          <Text style={styles.metaText}>{item.stock} in stock</Text>
         </View>
         <View style={styles.metaItem}>
-          <MaterialIcons name="visibility" size={14} color={Colors.outline} />
-          <Text style={styles.metaText}>{item.views}</Text>
-        </View>
-        <View style={styles.metaItem}>
-          <MaterialIcons name="forum" size={14} color={Colors.outline} />
-          <Text style={styles.metaText}>{item.inquiries}</Text>
+          <MaterialIcons name="category" size={14} color={Colors.outline} />
+          <Text style={styles.metaText}>{item.category}</Text>
         </View>
       </View>
 
       <View style={styles.cardFooter}>
-        <Text style={styles.cardDate}>Listed {item.date}</Text>
+        <Text style={styles.cardDate}>Listed {listedDate(item.createdAt)}</Text>
         <View style={styles.footerActions}>
           {nextAction && (
             <TouchableOpacity style={styles.textBtn} onPress={() => onAdvance(item)} activeOpacity={0.7}>
@@ -204,27 +163,23 @@ function ListingCard({ item, onAdvance, onDelete }: { item: Listing; onAdvance: 
   );
 }
 
-function InventoryCard({ item, onUpdateStock, onRemove, onRestock }: {
-  item: InventoryItem;
-  onUpdateStock: (item: InventoryItem, delta: number) => void;
-  onRemove: (item: InventoryItem) => void;
-  onRestock: (item: InventoryItem) => void;
+function InventoryCard({ item, onUpdateStock, onRestock }: {
+  item: VendorProduct;
+  onUpdateStock: (item: VendorProduct, delta: number) => void;
+  onRestock: (item: VendorProduct) => void;
 }) {
-  const status = stockStatus(item);
-  const margin = item.costPrice > 0 ? Math.round(((item.sellingPrice - item.costPrice) / item.costPrice) * 100) : 0;
-  const fill = Math.min(item.inStock / (item.minStock * 2), 1);
+  const status = stockStatus(item.stock, item.minStock);
+  const margin = item.costPrice && item.costPrice > 0 ? Math.round(((item.price - item.costPrice) / item.costPrice) * 100) : 0;
+  const fill = Math.min(item.stock / (item.minStock * 2), 1);
   return (
     <View style={[styles.card, { borderLeftColor: status.color }, status.key === 'out' && styles.cardMuted]}>
       <View style={styles.cardRow}>
         <View style={styles.emojiTile}>
-          <Text style={styles.emoji}>{item.emoji}</Text>
+          <ProductThumb uri={item.photoUrls[0]} />
         </View>
         <View style={styles.cardBody}>
           <View style={styles.cardTopRow}>
-            <Text style={styles.cardTitle} numberOfLines={2}>{item.title}</Text>
-            <TouchableOpacity style={styles.iconBtn} onPress={() => onRemove(item)} hitSlop={6} activeOpacity={0.6}>
-              <MaterialIcons name="delete-outline" size={18} color={Colors.outline} />
-            </TouchableOpacity>
+            <Text style={styles.cardTitle} numberOfLines={2}>{item.name}</Text>
           </View>
           <View style={styles.subRow}>
             <Pill {...status} />
@@ -237,12 +192,12 @@ function InventoryCard({ item, onUpdateStock, onRemove, onRestock }: {
         <View style={styles.metric}>
           <Text style={styles.metricLabel}>Available</Text>
           <Text style={[styles.metricValue, { color: status.key === 'ok' ? Colors.onSurface : status.color }]}>
-            {item.inStock} <Text style={styles.metricUnit}>{item.unit}</Text>
+            {item.stock} <Text style={styles.metricUnit}>{item.unit}</Text>
           </Text>
         </View>
         <View style={styles.metric}>
           <Text style={styles.metricLabel}>Price</Text>
-          <Text style={styles.metricValue}>{formatPrice(item.sellingPrice)}</Text>
+          <Text style={styles.metricValue}>{formatPrice(item.price)}</Text>
         </View>
         <View style={styles.metric}>
           <Text style={styles.metricLabel}>Margin</Text>
@@ -253,14 +208,14 @@ function InventoryCard({ item, onUpdateStock, onRemove, onRestock }: {
       <View style={styles.barTrack}>
         <View style={[styles.barFill, { width: `${fill * 100}%`, backgroundColor: status.color }]} />
       </View>
-      <Text style={styles.barCaption}>Min. level {item.minStock} · restocked {item.lastRestocked}</Text>
+      <Text style={styles.barCaption}>Min. level {item.minStock}</Text>
 
       <View style={styles.invActions}>
         <View style={styles.stepper}>
-          <TouchableOpacity style={styles.stepBtn} onPress={() => onUpdateStock(item, -1)} disabled={item.inStock === 0} activeOpacity={0.6}>
-            <MaterialIcons name="remove" size={18} color={item.inStock === 0 ? Colors.outlineVariant : Colors.primary} />
+          <TouchableOpacity style={styles.stepBtn} onPress={() => onUpdateStock(item, -1)} disabled={item.stock === 0} activeOpacity={0.6}>
+            <MaterialIcons name="remove" size={18} color={item.stock === 0 ? Colors.outlineVariant : Colors.primary} />
           </TouchableOpacity>
-          <Text style={styles.stepValue}>{item.inStock}</Text>
+          <Text style={styles.stepValue}>{item.stock}</Text>
           <TouchableOpacity style={styles.stepBtn} onPress={() => onUpdateStock(item, 1)} activeOpacity={0.6}>
             <MaterialIcons name="add" size={18} color={Colors.primary} />
           </TouchableOpacity>
@@ -277,11 +232,14 @@ function InventoryCard({ item, onUpdateStock, onRemove, onRestock }: {
 export default function MyListingsScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const mine = useQuery(api.products.mine);
+  const removeProduct = useMutation(api.products.remove);
+  const updateProduct = useMutation(api.products.update);
+  const adjustStock = useMutation(api.products.adjustStock);
+
   const [activeTab, setActiveTab] = useState<'listings' | 'inventory'>('listings');
   const [query, setQuery] = useState('');
-  const [listings, setListings] = useState<Listing[]>(MY_LISTINGS);
   const [listingFilter, setListingFilter] = useState('all');
-  const [inventory, setInventory] = useState<InventoryItem[]>(INITIAL_INVENTORY);
   const [stockFilter, setStockFilter] = useState('all');
 
   const [showAddSheet, setShowAddSheet] = useState(false);
@@ -291,41 +249,42 @@ export default function MyListingsScreen() {
   const [addCostPrice, setAddCostPrice] = useState('');
   const [addMinStock, setAddMinStock] = useState('');
 
-  const [restockTarget, setRestockTarget] = useState<InventoryItem | null>(null);
+  const [restockTarget, setRestockTarget] = useState<VendorProduct | null>(null);
   const [restockQty, setRestockQty] = useState('');
 
   const q = query.trim().toLowerCase();
+  const products: VendorProduct[] = mine ?? [];
 
   const filteredListings = useMemo(
-    () => listings.filter((l) => (listingFilter === 'all' || l.status === listingFilter) && (!q || l.title.toLowerCase().includes(q))),
-    [listings, listingFilter, q]
+    () => products.filter((l) => (listingFilter === 'all' || l.status === listingFilter) && (!q || l.name.toLowerCase().includes(q))),
+    [products, listingFilter, q]
   );
 
   const filteredInventory = useMemo(
-    () => inventory.filter((i) => {
-      const s = stockStatus(i).key;
+    () => products.filter((i) => {
+      const s = stockStatus(i.stock, i.minStock).key;
       const matchesFilter = stockFilter === 'all' || (stockFilter === 'low' ? s === 'low' : s === 'out');
-      return matchesFilter && (!q || i.title.toLowerCase().includes(q) || i.category.toLowerCase().includes(q));
+      return matchesFilter && (!q || i.name.toLowerCase().includes(q) || i.category.toLowerCase().includes(q));
     }),
-    [inventory, stockFilter, q]
+    [products, stockFilter, q]
   );
 
   const listingStats = useMemo(() => ({
-    active: listings.filter((l) => l.status === 'active').length,
-    draft: listings.filter((l) => l.status === 'draft').length,
-    sold: listings.filter((l) => l.status === 'sold').length,
-    value: listings.filter((l) => l.status === 'active').reduce((s, l) => s + l.price * l.quantity, 0),
-  }), [listings]);
+    active: products.filter((l) => l.status === 'active').length,
+    draft: products.filter((l) => l.status === 'draft').length,
+    sold: products.filter((l) => l.status === 'sold').length,
+    value: products.filter((l) => l.status === 'active').reduce((s, l) => s + l.price * l.stock, 0),
+  }), [products]);
 
   const inventoryStats = useMemo(() => ({
-    units: inventory.reduce((s, i) => s + i.inStock, 0),
-    low: inventory.filter((i) => stockStatus(i).key === 'low').length,
-    out: inventory.filter((i) => i.inStock === 0).length,
-    profit: inventory.reduce((s, i) => s + (i.sellingPrice - i.costPrice) * i.inStock, 0),
-  }), [inventory]);
+    units: products.reduce((s, i) => s + i.stock, 0),
+    low: products.filter((i) => stockStatus(i.stock, i.minStock).key === 'low').length,
+    out: products.filter((i) => i.stock === 0).length,
+    profit: products.reduce((s, i) => s + ((i.price - (i.costPrice ?? i.price)) * i.stock), 0),
+  }), [products]);
 
-  const categoryProducts = useMemo(() => PRODUCTS.filter((p) => p.category === selectedCategory), [selectedCategory]);
-  const selectedProduct = PRODUCTS.find((p) => p.id === selectedProductId) ?? null;
+  const categoryProducts = useMemo(() => products.filter((p) => p.category === selectedCategory), [products, selectedCategory]);
+  const selectedProduct = products.find((p) => p._id === selectedProductId) ?? null;
 
   const closeAddSheet = () => {
     setShowAddSheet(false);
@@ -336,33 +295,21 @@ export default function MyListingsScreen() {
     setAddMinStock('');
   };
 
-  const handleAddToInventory = () => {
-    if (!selectedProduct || !Number(addQty) || !Number(addCostPrice)) {
-      Alert.alert('Missing details', 'Pick a product and enter quantity and cost price.');
+  const handleAddToInventory = async () => {
+    if (!selectedProduct || !Number(addQty)) {
+      Alert.alert('Missing details', 'Pick a product and enter a quantity.');
       return;
     }
-    const existing = inventory.find((i) => i.title === selectedProduct.name);
-    if (existing) {
-      setInventory((prev) => prev.map((i) =>
-        i.id === existing.id
-          ? { ...i, inStock: i.inStock + Number(addQty), costPrice: Number(addCostPrice), lastRestocked: todaysDate() }
-          : i
-      ));
-    } else {
-      setInventory((prev) => [...prev, {
-        id: 'inv-' + Date.now(),
-        title: selectedProduct.name,
-        emoji: selectedProduct.imageEmoji,
-        category: selectedProduct.category,
-        inStock: Number(addQty),
-        minStock: Number(addMinStock) || 10,
-        unit: selectedProduct.unit,
-        costPrice: Number(addCostPrice),
-        sellingPrice: selectedProduct.price,
-        lastRestocked: todaysDate(),
-      }]);
+    try {
+      await adjustStock({
+        id: selectedProduct._id as Id<'products'>,
+        delta: Number(addQty),
+        ...(addCostPrice ? { costPrice: Number(addCostPrice) } : {}),
+      });
+      closeAddSheet();
+    } catch (e) {
+      Alert.alert('Could not add stock', errorMessage(e));
     }
-    closeAddSheet();
   };
 
   const closeRestock = () => {
@@ -370,30 +317,46 @@ export default function MyListingsScreen() {
     setRestockQty('');
   };
 
-  const handleRestock = () => {
+  const handleRestock = async () => {
     if (!restockTarget || !Number(restockQty)) return;
-    setInventory((prev) => prev.map((i) =>
-      i.id === restockTarget.id ? { ...i, inStock: i.inStock + Number(restockQty), lastRestocked: todaysDate() } : i
-    ));
-    closeRestock();
+    try {
+      await adjustStock({ id: restockTarget._id as Id<'products'>, delta: Number(restockQty) });
+      closeRestock();
+    } catch (e) {
+      Alert.alert('Could not restock', errorMessage(e));
+    }
   };
 
-  const handleUpdateStock = (item: InventoryItem, delta: number) =>
-    setInventory((prev) => prev.map((i) => (i.id === item.id ? { ...i, inStock: Math.max(0, i.inStock + delta) } : i)));
+  const handleUpdateStock = async (item: VendorProduct, delta: number) => {
+    try {
+      await adjustStock({ id: item._id as Id<'products'>, delta });
+    } catch (e) {
+      Alert.alert('Could not update stock', errorMessage(e));
+    }
+  };
 
-  const handleRemoveItem = (item: InventoryItem) =>
-    Alert.alert('Remove from inventory', `Remove "${item.title}" from your stock?`, [
+  const handleAdvanceListing = async (item: VendorProduct) => {
+    try {
+      await updateProduct({ id: item._id as Id<'products'>, status: item.status === 'draft' ? 'active' : 'sold' });
+    } catch (e) {
+      Alert.alert('Could not update listing', errorMessage(e));
+    }
+  };
+
+  const handleDeleteListing = (item: VendorProduct) =>
+    Alert.alert('Delete listing', `Delete "${item.name}"? Buyers will no longer see it.`, [
       { text: 'Cancel', style: 'cancel' },
-      { text: 'Remove', style: 'destructive', onPress: () => setInventory((prev) => prev.filter((i) => i.id !== item.id)) },
-    ]);
-
-  const handleAdvanceListing = (item: Listing) =>
-    setListings((prev) => prev.map((l) => (l.id === item.id ? { ...l, status: l.status === 'draft' ? 'active' : 'sold' } : l)));
-
-  const handleDeleteListing = (item: Listing) =>
-    Alert.alert('Delete listing', `Delete "${item.title}"? Buyers will no longer see it.`, [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Delete', style: 'destructive', onPress: () => setListings((prev) => prev.filter((l) => l.id !== item.id)) },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await removeProduct({ id: item._id as Id<'products'> });
+          } catch (e) {
+            Alert.alert('Could not delete', errorMessage(e));
+          }
+        },
+      },
     ]);
 
   const isListings = activeTab === 'listings';
@@ -438,7 +401,7 @@ export default function MyListingsScreen() {
           value={listingFilter}
           onSelect={setListingFilter}
           options={[
-            { key: 'all', label: 'All', count: listings.length },
+            { key: 'all', label: 'All', count: products.length },
             { key: 'active', label: 'Active', count: listingStats.active },
             { key: 'draft', label: 'Drafts', count: listingStats.draft },
             { key: 'sold', label: 'Sold', count: listingStats.sold },
@@ -449,7 +412,7 @@ export default function MyListingsScreen() {
           value={stockFilter}
           onSelect={setStockFilter}
           options={[
-            { key: 'all', label: 'All', count: inventory.length },
+            { key: 'all', label: 'All', count: products.length },
             { key: 'low', label: 'Low stock', count: inventoryStats.low },
             { key: 'out', label: 'Out of stock', count: inventoryStats.out },
           ]}
@@ -458,7 +421,14 @@ export default function MyListingsScreen() {
     </>
   );
 
-  const empty = (
+  const loadingView = (
+    <View style={styles.empty}>
+      <ActivityIndicator size="large" color={Colors.primary} />
+      <Text style={styles.emptySub}>Loading your store…</Text>
+    </View>
+  );
+
+  const empty = mine === undefined ? loadingView : (
     <View style={styles.empty}>
       <View style={styles.emptyIcon}>
         <MaterialIcons name={isListings ? 'storefront' : 'inventory-2'} size={36} color={Colors.outline} />
@@ -486,7 +456,7 @@ export default function MyListingsScreen() {
     ListEmptyComponent: empty,
   };
 
-  const restockAfter = restockTarget ? restockTarget.inStock + (Number(restockQty) || 0) : 0;
+  const restockAfter = restockTarget ? restockTarget.stock + (Number(restockQty) || 0) : 0;
 
   return (
     <View style={styles.container}>
@@ -502,7 +472,7 @@ export default function MyListingsScreen() {
               onPress={() => { setActiveTab(tab.key); setQuery(''); }}
               activeOpacity={0.7}
             >
-              <MaterialIcons name={tab.icon} size={18} color={active ? Colors.onPrimary : Colors.onSurfaceVariant} />
+              <MaterialIcons name={tab.icon as any} size={18} color={active ? Colors.onPrimary : Colors.onSurfaceVariant} />
               <Text style={[styles.segmentText, active && styles.segmentTextActive]}>{tab.label}</Text>
               {tab.key === 'inventory' && inventoryStats.low + inventoryStats.out > 0 && (
                 <View style={styles.segmentBadge}>
@@ -517,8 +487,8 @@ export default function MyListingsScreen() {
       {isListings ? (
         <FlatList
           key="listings"
-          data={filteredListings}
-          keyExtractor={(item) => item.id}
+          data={mine === undefined ? [] : filteredListings}
+          keyExtractor={(item) => item._id}
           renderItem={({ item, index }) => (
             <FadeIn index={index}>
               <ListingCard item={item} onAdvance={handleAdvanceListing} onDelete={handleDeleteListing} />
@@ -529,14 +499,13 @@ export default function MyListingsScreen() {
       ) : (
         <FlatList
           key="inventory"
-          data={filteredInventory}
-          keyExtractor={(item) => item.id}
+          data={mine === undefined ? [] : filteredInventory}
+          keyExtractor={(item) => item._id}
           renderItem={({ item, index }) => (
             <FadeIn index={index}>
               <InventoryCard
                 item={item}
                 onUpdateStock={handleUpdateStock}
-                onRemove={handleRemoveItem}
                 onRestock={(i) => { setRestockTarget(i); setRestockQty(''); }}
               />
             </FadeIn>
@@ -569,10 +538,10 @@ export default function MyListingsScreen() {
             <>
               <Text style={[styles.label, styles.labelGap]}>Product</Text>
               {categoryProducts.map((p) => {
-                const active = p.id === selectedProductId;
+                const active = p._id === selectedProductId;
                 return (
-                  <TouchableOpacity key={p.id} style={[styles.productRow, active && styles.productRowActive]} onPress={() => setSelectedProductId(p.id)} activeOpacity={0.7}>
-                    <Text style={styles.productEmoji}>{p.imageEmoji}</Text>
+                  <TouchableOpacity key={p._id} style={[styles.productRow, active && styles.productRowActive]} onPress={() => setSelectedProductId(p._id)} activeOpacity={0.7}>
+                    <ProductThumb uri={p.photoUrls[0]} />
                     <View style={{ flex: 1 }}>
                       <Text style={styles.productName} numberOfLines={1}>{p.name}</Text>
                       <Text style={styles.productPrice}>{formatPrice(p.price)} / {p.unit}</Text>
@@ -623,10 +592,10 @@ export default function MyListingsScreen() {
         {restockTarget && (
           <>
             <View style={styles.restockItem}>
-              <Text style={styles.productEmoji}>{restockTarget.emoji}</Text>
+              <ProductThumb uri={restockTarget.photoUrls[0]} />
               <View style={{ flex: 1 }}>
-                <Text style={styles.productName} numberOfLines={1}>{restockTarget.title}</Text>
-                <Text style={styles.productPrice}>Now {restockTarget.inStock} {restockTarget.unit} · min. {restockTarget.minStock}</Text>
+                <Text style={styles.productName} numberOfLines={1}>{restockTarget.name}</Text>
+                <Text style={styles.productPrice}>Now {restockTarget.stock} {restockTarget.unit} · min. {restockTarget.minStock}</Text>
               </View>
             </View>
 
@@ -770,6 +739,7 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.surfaceVariant + '66',
     alignItems: 'center',
     justifyContent: 'center',
+    overflow: 'hidden',
   },
   emoji: { fontSize: 28 },
   cardBody: { flex: 1 },
@@ -887,7 +857,6 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   productRowActive: { borderColor: Colors.primary, backgroundColor: Colors.greenTint + '4d' },
-  productEmoji: { fontSize: 26 },
   productName: { fontSize: 15, fontWeight: '600', color: Colors.onSurface },
   productPrice: { fontSize: 13, color: Colors.outline, marginTop: 2 },
 

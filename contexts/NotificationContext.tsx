@@ -1,5 +1,19 @@
-import { createContext, useContext, useState, useCallback, useRef, type ReactNode } from 'react';
-import { NOTIFICATIONS as MOCK_NOTIFICATIONS, type NotificationItem } from '../constants/MockData';
+import { createContext, useContext, useMemo, type ReactNode } from 'react';
+import { useMutation, useQuery } from 'convex/react';
+import { useConvexAuth } from '@convex-dev/auth/react';
+import { api } from '../convex/_generated/api';
+import type { Id } from '../convex/_generated/dataModel';
+
+export type NotificationItem = {
+  id: string;
+  type: 'order' | 'price_drop' | 'worker' | 'stock' | 'review' | 'payment' | 'job' | 'system';
+  title: string;
+  message: string;
+  timestamp: string;
+  read: boolean;
+  icon: string;
+  actionRoute?: string;
+};
 
 type NotificationContextType = {
   notifications: NotificationItem[];
@@ -8,42 +22,53 @@ type NotificationContextType = {
   markAllAsRead: () => void;
   dismissNotification: (id: string) => void;
   addNotification: (notif: Omit<NotificationItem, 'id' | 'read'>) => void;
+  loading: boolean;
 };
 
 const NotificationContext = createContext<NotificationContextType | null>(null);
 
-let notifIdCounter = 100;
-
 export function NotificationProvider({ children }: { children: ReactNode }) {
-  const [notifications, setNotifications] = useState<NotificationItem[]>(MOCK_NOTIFICATIONS);
-  const idCounter = useRef(notifIdCounter);
+  const { isAuthenticated } = useConvexAuth();
+  const rows = useQuery(api.notifications.list, isAuthenticated ? { limit: 100 } : 'skip');
+  const markRead = useMutation(api.notifications.markRead);
+  const markAll = useMutation(api.notifications.markAllRead);
+  const remove = useMutation(api.notifications.remove);
+  const broadcast = useMutation(api.notifications.broadcast);
 
-  const unreadCount = notifications.filter((n) => !n.read).length;
-
-  const markAsRead = useCallback((id: string) => {
-    setNotifications((prev) =>
-      prev.map((n) => (n.id === id ? { ...n, read: true } : n))
-    );
-  }, []);
-
-  const markAllAsRead = useCallback(() => {
-    setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
-  }, []);
-
-  const dismissNotification = useCallback((id: string) => {
-    setNotifications((prev) => prev.filter((n) => n.id !== id));
-  }, []);
-
-  const addNotification = useCallback((notif: Omit<NotificationItem, 'id' | 'read'>) => {
-    const id = 'n-admin-' + Date.now();
-    setNotifications((prev) => [{ ...notif, id, read: false }, ...prev]);
-  }, []);
-
-  return (
-    <NotificationContext.Provider value={{ notifications, unreadCount, markAsRead, markAllAsRead, dismissNotification, addNotification }}>
-      {children}
-    </NotificationContext.Provider>
+  const notifications = useMemo<NotificationItem[]>(
+    () => (rows ?? []).map((n) => ({
+      id: n._id,
+      type: n.type,
+      title: n.title,
+      message: n.message,
+      read: n.read,
+      timestamp: new Date(n.createdAt).toISOString(),
+      icon: n.icon ?? 'notifications',
+      actionRoute: n.actionRoute,
+    })),
+    [rows],
   );
+
+  const value: NotificationContextType = {
+    notifications,
+    unreadCount: notifications.filter((n) => !n.read).length,
+    loading: isAuthenticated && rows === undefined,
+    markAsRead: (id) => { void markRead({ id: id as Id<'notifications'> }); },
+    markAllAsRead: () => { void markAll({}); },
+    dismissNotification: (id) => { void remove({ id: id as Id<'notifications'> }); },
+    addNotification: (notif) => {
+      void broadcast({
+        title: notif.title,
+        message: notif.message,
+        audience: 'all',
+        type: notif.type,
+        icon: notif.icon,
+        actionRoute: notif.actionRoute,
+      });
+    },
+  };
+
+  return <NotificationContext.Provider value={value}>{children}</NotificationContext.Provider>;
 }
 
 export function useNotifications() {

@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { PRODUCTS } from '../../constants/MockData';
+import { useQuery } from 'convex/react';
+import { api } from '../../convex/_generated/api';
 import CategoryShell, { EmptyResult, Footnote, Label, OrderLine, Result, Row, Stepper, Wrap, numeric } from '../../components/CategoryShell';
 import { Chip, Field } from '../../components/EngineerUI';
 import { blocks } from '../../lib/estimators';
@@ -18,7 +19,8 @@ export default function BlocksScreen() {
   const [waste, setWaste] = useState(5);
 
   const est = blocks(parseFloat(length), parseFloat(height), doors, windows, waste);
-  const product = PRODUCTS.find((p) => p.category === 'Blocks' && p.name.includes(`${size} inch`));
+  const blocksProducts = useQuery(api.products.list, { category: 'Blocks' }) ?? [];
+  const product = blocksProducts.find((p) => p.name.includes(`${size} inch`));
 
   return (
     <CategoryShell

@@ -1,48 +1,39 @@
 import { useState, useMemo } from 'react';
-import { View, Text, FlatList, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
-import { Stack } from 'expo-router';
+import { View, Text, FlatList, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator } from 'react-native';
+import { Stack, useRouter } from 'expo-router';
 import { MaterialIcons } from '@expo/vector-icons';
+import { useQuery } from 'convex/react';
+import { api } from '../convex/_generated/api';
 import { Colors } from '../constants/Colors';
+import { formatPrice } from '../lib/backend';
 
 type HistoryOrder = {
-  id: string;
-  date: string;
-  vendor: string;
-  emoji: string;
-  items: string;
+  _id: string;
+  number: string;
+  createdAt: number;
+  storeName: string;
+  itemsSummary: string;
   total: number;
-  status: 'delivered' | 'cancelled' | 'returned';
+  status: 'delivered' | 'cancelled';
 };
-
-const HISTORY: HistoryOrder[] = [
-  { id: 'ORD-2024-001', date: '15 May 2026', vendor: 'Lagos Building Supplies', emoji: '🏗️', items: 'Dangote Cement 42.5R (50kg) × 2', total: 17000, status: 'delivered' },
-  { id: 'ORD-2024-005', date: '10 Apr 2026', vendor: 'TileWorld Nigeria', emoji: '🏛️', items: 'Ceramic Floor Tiles 60×60cm × 5', total: 17500, status: 'delivered' },
-  { id: 'ORD-2024-006', date: '28 Mar 2026', vendor: 'Steel Masters Ltd', emoji: '⚙️', items: 'Iron Rod 12mm (6m) × 3', total: 20400, status: 'delivered' },
-  { id: 'ORD-2024-007', date: '15 Mar 2026', vendor: 'RoofPro Nigeria', emoji: '🏠', items: 'Aluminum Roofing Sheet (0.5mm) × 2', total: 8400, status: 'cancelled' },
-  { id: 'ORD-2024-008', date: '2 Mar 2026', vendor: 'PlumbShop PH', emoji: '🔧', items: 'PVC Water Pipe 3/4 inch (9m) × 4', total: 11200, status: 'delivered' },
-  { id: 'ORD-2024-009', date: '18 Feb 2026', vendor: 'ColourShop Abuja', emoji: '🎨', items: 'Emulsion Paint 20L (White) × 1', total: 12500, status: 'delivered' },
-  { id: 'ORD-2024-010', date: '5 Feb 2026', vendor: 'Kano Block Factory', emoji: '🧱', items: 'Sandcrete Block (9 inches) × 50', total: 20000, status: 'returned' },
-];
 
 const FILTERS = [
   { key: 'all', label: 'All', icon: 'receipt-long' },
   { key: 'delivered', label: 'Delivered', icon: 'check-circle' },
   { key: 'cancelled', label: 'Cancelled', icon: 'cancel' },
-  { key: 'returned', label: 'Returned', icon: 'assignment-return' },
 ] as const;
 
 const STATUS_META: Record<string, { label: string; color: string; icon: string }> = {
   delivered: { label: 'Delivered', color: Colors.primary, icon: 'check-circle' },
   cancelled: { label: 'Cancelled', color: Colors.error, icon: 'cancel' },
-  returned: { label: 'Returned', color: Colors.amber, icon: 'assignment-return' },
 };
 
-const formatPrice = (price: number) => '₦' + price.toLocaleString('en-NG');
+const monthKey = (t: number) => new Date(t).toLocaleDateString('en-GB', { month: 'short', year: 'numeric' });
+const fullDate = (t: number) => new Date(t).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
 
 function groupByMonth(orders: HistoryOrder[]) {
   return orders.reduce<Record<string, HistoryOrder[]>>((acc, order) => {
-    const parts = order.date.split(' ');
-    const month = parts[1] + ' ' + parts[2];
+    const month = monthKey(order.createdAt);
     if (!acc[month]) acc[month] = [];
     acc[month].push(order);
     return acc;
@@ -50,12 +41,30 @@ function groupByMonth(orders: HistoryOrder[]) {
 }
 
 export default function OrderHistoryScreen() {
+  const router = useRouter();
   const [activeFilter, setActiveFilter] = useState<string>('all');
+  const rows = useQuery(api.orders.mine);
+
+  const history: HistoryOrder[] = useMemo(
+    () =>
+      (rows ?? [])
+        .filter((o) => o.status === 'delivered' || o.status === 'cancelled')
+        .map((o) => ({
+          _id: o._id,
+          number: o.number,
+          createdAt: o._creationTime,
+          storeName: o.storeName,
+          itemsSummary: o.items.map((i) => `${i.name} × ${i.quantity}`).join(', '),
+          total: o.total,
+          status: o.status as 'delivered' | 'cancelled',
+        })),
+    [rows]
+  );
 
   const filtered = useMemo(() => {
-    if (activeFilter === 'all') return HISTORY;
-    return HISTORY.filter((o) => o.status === activeFilter);
-  }, [activeFilter]);
+    if (activeFilter === 'all') return history;
+    return history.filter((o) => o.status === activeFilter);
+  }, [history, activeFilter]);
 
   const sections = useMemo(() => {
     return Object.entries(groupByMonth(filtered));
@@ -70,109 +79,120 @@ export default function OrderHistoryScreen() {
   return (
     <View style={styles.container}>
       <Stack.Screen options={{ headerTitle: 'Order History' }} />
-      <FlatList
-        data={sections}
-        keyExtractor={([month]) => month}
-        contentContainerStyle={styles.list}
-        showsVerticalScrollIndicator={false}
-        ListHeaderComponent={
-          <>
-            <View style={styles.statsBar}>
-              <View style={styles.statCard}>
-                <MaterialIcons name="receipt-long" size={18} color={Colors.primary} />
-                <Text style={styles.statNumber}>{stats.totalOrders}</Text>
-                <Text style={styles.statLabel}>Orders</Text>
+      {rows === undefined ? (
+        <View style={styles.loading}>
+          <ActivityIndicator size="large" color={Colors.primary} />
+          <Text style={styles.emptySub}>Loading your history…</Text>
+        </View>
+      ) : (
+        <FlatList
+          data={sections}
+          keyExtractor={([month]) => month}
+          contentContainerStyle={styles.list}
+          showsVerticalScrollIndicator={false}
+          ListHeaderComponent={
+            <>
+              <View style={styles.statsBar}>
+                <View style={styles.statCard}>
+                  <MaterialIcons name="receipt-long" size={18} color={Colors.primary} />
+                  <Text style={styles.statNumber}>{stats.totalOrders}</Text>
+                  <Text style={styles.statLabel}>Orders</Text>
+                </View>
+                <View style={styles.statDivider} />
+                <View style={styles.statCard}>
+                  <MaterialIcons name="account-balance-wallet" size={18} color={Colors.secondary} />
+                  <Text style={styles.statNumber}>{formatPrice(stats.totalSpent)}</Text>
+                  <Text style={styles.statLabel}>Total Spent</Text>
+                </View>
               </View>
-              <View style={styles.statDivider} />
-              <View style={styles.statCard}>
-                <MaterialIcons name="account-balance-wallet" size={18} color={Colors.secondary} />
-                <Text style={styles.statNumber}>{formatPrice(stats.totalSpent)}</Text>
-                <Text style={styles.statLabel}>Total Spent</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterRow} contentContainerStyle={styles.filterContent}>
+                {FILTERS.map((f) => {
+                  const active = activeFilter === f.key;
+                  return (
+                    <TouchableOpacity
+                      key={f.key}
+                      style={[styles.filterChip, active && styles.filterChipActive]}
+                      onPress={() => setActiveFilter(f.key)}
+                      activeOpacity={0.7}
+                    >
+                      <MaterialIcons name={f.icon as any} size={14} color={active ? '#fff' : Colors.textMedium} />
+                      <Text style={[styles.filterChipText, active && styles.filterChipTextActive]}>{f.label}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+            </>
+          }
+          renderItem={({ item: [month, orders] }) => (
+            <View style={styles.section}>
+              <View style={styles.monthRow}>
+                <View style={styles.monthAccent} />
+                <Text style={styles.monthLabel}>{month}</Text>
+              </View>
+              <View style={styles.timeline}>
+                {orders.map((order, idx) => {
+                  const meta = STATUS_META[order.status];
+                  const isLast = idx === orders.length - 1;
+                  return (
+                    <TouchableOpacity key={order._id} style={styles.timelineItem} activeOpacity={0.8}>
+                      <View style={styles.timelineLeft}>
+                        <View style={[styles.dot, { backgroundColor: meta.color }]}>
+                          <View style={[styles.dotInner, { backgroundColor: meta.color }]} />
+                        </View>
+                        {!isLast && <View style={styles.line} />}
+                      </View>
+                      <View style={[styles.timelineCard, { borderLeftColor: meta.color }]}>
+                        <View style={styles.cardTop}>
+                          <Text style={styles.cardEmoji}>📦</Text>
+                          <View style={styles.cardMeta}>
+                            <Text style={styles.cardId}>{order.number}</Text>
+                            <Text style={styles.cardDate}>{fullDate(order.createdAt)}</Text>
+                          </View>
+                          <View style={[styles.badge, { backgroundColor: meta.color + '18' }]}>
+                            <MaterialIcons name={meta.icon as any} size={11} color={meta.color} />
+                            <Text style={[styles.badgeText, { color: meta.color }]}>{meta.label}</Text>
+                          </View>
+                        </View>
+                        <Text style={styles.cardVendor}>{order.storeName}</Text>
+                        <Text style={styles.cardItems} numberOfLines={1}>{order.itemsSummary}</Text>
+                        <View style={styles.cardBottom}>
+                          <Text style={styles.cardTotal}>{formatPrice(order.total)}</Text>
+                          <TouchableOpacity
+                            style={styles.reorderBtn}
+                            activeOpacity={0.6}
+                            onPress={() => router.push('/(tabs)/materials' as any)}
+                          >
+                            <MaterialIcons name="replay" size={13} color="#fff" />
+                            <Text style={styles.reorderText}>Reorder</Text>
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+                    </TouchableOpacity>
+                  );
+                })}
               </View>
             </View>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterRow} contentContainerStyle={styles.filterContent}>
-              {FILTERS.map((f) => {
-                const active = activeFilter === f.key;
-                return (
-                  <TouchableOpacity
-                    key={f.key}
-                    style={[styles.filterChip, active && styles.filterChipActive]}
-                    onPress={() => setActiveFilter(f.key)}
-                    activeOpacity={0.7}
-                  >
-                    <MaterialIcons name={f.icon as any} size={14} color={active ? '#fff' : Colors.textMedium} />
-                    <Text style={[styles.filterChipText, active && styles.filterChipTextActive]}>{f.label}</Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </ScrollView>
-          </>
-        }
-        renderItem={({ item: [month, orders] }) => (
-          <View style={styles.section}>
-            <View style={styles.monthRow}>
-              <View style={styles.monthAccent} />
-              <Text style={styles.monthLabel}>{month}</Text>
+          )}
+          ListEmptyComponent={
+            <View style={styles.empty}>
+              <View style={styles.emptyIconWrap}>
+                <MaterialIcons name="search-off" size={44} color={Colors.border} />
+              </View>
+              <Text style={styles.emptyTitle}>No {activeFilter !== 'all' ? activeFilter : ''} orders</Text>
+              <Text style={styles.emptySub}>
+                {activeFilter === 'all'
+                  ? 'Completed orders will appear here'
+                  : `You have no ${activeFilter} orders in your history`}
+              </Text>
+              {activeFilter !== 'all' && (
+                <TouchableOpacity style={styles.clearFilterBtn} onPress={() => setActiveFilter('all')}>
+                  <Text style={styles.clearFilterText}>Clear filter</Text>
+                </TouchableOpacity>
+              )}
             </View>
-            <View style={styles.timeline}>
-              {orders.map((order, idx) => {
-                const meta = STATUS_META[order.status];
-                const isLast = idx === orders.length - 1;
-                return (
-                  <TouchableOpacity key={order.id} style={styles.timelineItem} activeOpacity={0.8}>
-                    <View style={styles.timelineLeft}>
-                      <View style={[styles.dot, { backgroundColor: meta.color }]}>
-                        <View style={[styles.dotInner, { backgroundColor: meta.color }]} />
-                      </View>
-                      {!isLast && <View style={styles.line} />}
-                    </View>
-                    <View style={[styles.timelineCard, { borderLeftColor: meta.color }]}>
-                      <View style={styles.cardTop}>
-                        <Text style={styles.cardEmoji}>{order.emoji}</Text>
-                        <View style={styles.cardMeta}>
-                          <Text style={styles.cardId}>{order.id}</Text>
-                          <Text style={styles.cardDate}>{order.date}</Text>
-                        </View>
-                        <View style={[styles.badge, { backgroundColor: meta.color + '18' }]}>
-                          <MaterialIcons name={meta.icon as any} size={11} color={meta.color} />
-                          <Text style={[styles.badgeText, { color: meta.color }]}>{meta.label}</Text>
-                        </View>
-                      </View>
-                      <Text style={styles.cardVendor}>{order.vendor}</Text>
-                      <Text style={styles.cardItems} numberOfLines={1}>{order.items}</Text>
-                      <View style={styles.cardBottom}>
-                        <Text style={styles.cardTotal}>{formatPrice(order.total)}</Text>
-                        <TouchableOpacity style={styles.reorderBtn} activeOpacity={0.6}>
-                          <MaterialIcons name="replay" size={13} color="#fff" />
-                          <Text style={styles.reorderText}>Reorder</Text>
-                        </TouchableOpacity>
-                      </View>
-                    </View>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-          </View>
-        )}
-        ListEmptyComponent={
-          <View style={styles.empty}>
-            <View style={styles.emptyIconWrap}>
-              <MaterialIcons name="search-off" size={44} color={Colors.border} />
-            </View>
-            <Text style={styles.emptyTitle}>No {activeFilter !== 'all' ? activeFilter : ''} orders</Text>
-            <Text style={styles.emptySub}>
-              {activeFilter === 'all'
-                ? 'Completed orders will appear here'
-                : `You have no ${activeFilter} orders in your history`}
-            </Text>
-            {activeFilter !== 'all' && (
-              <TouchableOpacity style={styles.clearFilterBtn} onPress={() => setActiveFilter('all')}>
-                <Text style={styles.clearFilterText}>Clear filter</Text>
-              </TouchableOpacity>
-            )}
-          </View>
-        }
-      />
+          }
+        />
+      )}
     </View>
   );
 }
@@ -180,6 +200,7 @@ export default function OrderHistoryScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
   list: { padding: 20, paddingBottom: 32 },
+  loading: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12 },
 
   statsBar: {
     flexDirection: 'row',

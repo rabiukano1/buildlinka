@@ -3,11 +3,15 @@ import {
   View, Text, ScrollView, StyleSheet, TouchableOpacity, TextInput, Alert, Modal,
   KeyboardAvoidingView, Platform, Linking, ActivityIndicator,
 } from 'react-native';
-import { Stack } from 'expo-router';
+import { Stack, useRouter } from 'expo-router';
 import { MaterialIcons } from '@expo/vector-icons';
 import type { LocationGeocodedAddress } from 'expo-location';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useMutation, useQuery } from 'convex/react';
+import { api } from '../convex/_generated/api';
+import type { Id } from '../convex/_generated/dataModel';
 import { Colors } from '../constants/Colors';
+import { errorMessage } from '../lib/backend';
 import { useLocation, type LocationCoords } from '../hooks/useLocation';
 
 type LocationType = 'home' | 'work' | 'site' | 'other';
@@ -28,13 +32,6 @@ const TYPES: { value: LocationType; label: string; icon: string; color: string }
   { value: 'other', label: 'Other', icon: 'place', color: Colors.outline },
 ];
 const typeMeta = (t: LocationType) => TYPES.find((x) => x.value === t)!;
-
-const INITIAL_LOCATIONS: SavedLocation[] = [
-  { id: '1', name: 'Home', address: '12 Adeola Odeku Street', area: 'Victoria Island, Lagos', type: 'home', coords: { latitude: 6.4302, longitude: 3.4216 } },
-  { id: '2', name: 'Office', address: '35 Marina Road', area: 'Lagos Island, Lagos', type: 'work', coords: { latitude: 6.4500, longitude: 3.3958 } },
-  { id: '3', name: 'Lekki site', address: 'Plot 7, Lekki Phase 2', area: 'Lekki, Lagos', type: 'site', coords: { latitude: 6.4433, longitude: 3.5355 } },
-  { id: '4', name: 'Warehouse', address: '18 Ikorodu Road', area: 'Ikeja, Lagos', type: 'other' },
-];
 
 // Great-circle distance in km.
 const distanceKm = (a: LocationCoords, b: LocationCoords) => {
@@ -70,14 +67,33 @@ function TypeChips({ value, onChange }: { value: LocationType; onChange: (t: Loc
 
 export default function SavedLocationsScreen() {
   const insets = useSafeAreaInsets();
+  const router = useRouter();
   const { coords, place, loading, permission, error, refresh } = useLocation();
-  const [locations, setLocations] = useState(INITIAL_LOCATIONS);
+  const me = useQuery(api.users.me);
+  const rows = useQuery(api.saved.locations, me ? {} : 'skip');
+  const addLocation = useMutation(api.saved.addLocation);
+  const updateLocation = useMutation(api.saved.updateLocation);
+  const removeLocation = useMutation(api.saved.removeLocation);
   const [search, setSearch] = useState('');
+  const [saving, setSaving] = useState(false);
 
   const [detectedName, setDetectedName] = useState('');
   const [detectedType, setDetectedType] = useState<LocationType>('other');
 
   const [form, setForm] = useState<SavedLocation | null>(null);
+
+  const locations = useMemo<SavedLocation[]>(
+    () => (rows ?? []).map((r) => ({
+      id: r._id,
+      name: r.label,
+      address: r.address,
+      area: r.area,
+      type: r.type as LocationType,
+      coords: r.latitude != null && r.longitude != null ? { latitude: r.latitude, longitude: r.longitude } : undefined,
+    })),
+    [rows],
+  );
+
   const isEditing = !!form && locations.some((l) => l.id === form.id);
 
   const alreadySaved = useMemo(
@@ -90,17 +106,25 @@ export default function SavedLocationsScreen() {
     return q ? locations.filter((l) => `${l.name} ${l.address} ${l.area}`.toLowerCase().includes(q)) : locations;
   }, [locations, search]);
 
-  const saveDetected = () => {
+  const saveDetected = async () => {
     if (!coords || !place || !detectedName.trim()) return;
-    setLocations((prev) => [
-      ...prev,
-      { id: String(Date.now()), name: detectedName.trim(), address: streetLine(place), area: areaLine(place), type: detectedType, coords },
-    ]);
-    setDetectedName('');
-    setDetectedType('other');
+    try {
+      await addLocation({
+        label: detectedName.trim(),
+        address: streetLine(place),
+        area: areaLine(place),
+        type: detectedType,
+        latitude: coords.latitude,
+        longitude: coords.longitude,
+      });
+      setDetectedName('');
+      setDetectedType('other');
+    } catch (err) {
+      Alert.alert('Could not save location', errorMessage(err));
+    }
   };
 
-  const openAdd = () => setForm({ id: String(Date.now()), name: '', address: '', area: '', type: 'other' });
+  const openAdd = () => setForm({ id: '', name: '', address: '', area: '', type: 'other' });
 
   const fillFormFromGps = () => {
     if (!coords || !place) {
@@ -110,21 +134,43 @@ export default function SavedLocationsScreen() {
     setForm((f) => f && { ...f, address: streetLine(place), area: areaLine(place), coords });
   };
 
-  const saveForm = () => {
+  const saveForm = async () => {
     if (!form) return;
     if (!form.name.trim() || !form.address.trim()) {
       Alert.alert('Missing details', 'Give the location a name and an address.');
       return;
     }
-    const clean = { ...form, name: form.name.trim(), address: form.address.trim(), area: form.area.trim() };
-    setLocations((prev) => (isEditing ? prev.map((l) => (l.id === clean.id ? clean : l)) : [...prev, clean]));
-    setForm(null);
+    const args = {
+      label: form.name.trim(),
+      address: form.address.trim(),
+      area: form.area.trim() || undefined,
+      type: form.type,
+      latitude: form.coords?.latitude,
+      longitude: form.coords?.longitude,
+    };
+    setSaving(true);
+    try {
+      if (isEditing) await updateLocation({ id: form.id as Id<'savedLocations'>, ...args });
+      else await addLocation(args);
+      setForm(null);
+    } catch (err) {
+      Alert.alert('Could not save location', errorMessage(err));
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleDelete = (loc: SavedLocation) =>
     Alert.alert('Remove location', `Remove "${loc.name}" from saved locations?`, [
       { text: 'Cancel', style: 'cancel' },
-      { text: 'Remove', style: 'destructive', onPress: () => setLocations((prev) => prev.filter((l) => l.id !== loc.id)) },
+      {
+        text: 'Remove',
+        style: 'destructive',
+        onPress: async () => {
+          try { await removeLocation({ id: loc.id as Id<'savedLocations'> }); }
+          catch (err) { Alert.alert('Could not remove location', errorMessage(err)); }
+        },
+      },
     ]);
 
   const openDirections = (loc: SavedLocation) => {
@@ -210,6 +256,28 @@ export default function SavedLocationsScreen() {
     );
   };
 
+  if (me === undefined) {
+    return (
+      <View style={styles.centered}>
+        <Stack.Screen options={{ headerShown: true, headerTitle: 'Saved Locations' }} />
+        <ActivityIndicator color={Colors.primary} />
+      </View>
+    );
+  }
+
+  if (!me) {
+    return (
+      <View style={styles.centered}>
+        <Stack.Screen options={{ headerShown: true, headerTitle: 'Saved Locations' }} />
+        <MaterialIcons name="location-off" size={40} color={Colors.outline} />
+        <Text style={styles.emptyTitle}>Sign in to save locations</Text>
+        <TouchableOpacity style={styles.smallPill} onPress={() => router.push('/sign-in' as any)}>
+          <Text style={styles.smallPillText}>Sign in</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.container}>
       <Stack.Screen options={{ headerShown: true, headerTitle: 'Saved Locations', headerShadowVisible: false, headerStyle: { backgroundColor: Colors.background }, headerTintColor: Colors.primary }} />
@@ -234,7 +302,9 @@ export default function SavedLocationsScreen() {
           </View>
         )}
 
-        {filtered.map((loc) => {
+        {rows === undefined && <ActivityIndicator color={Colors.primary} style={{ marginVertical: 24 }} />}
+
+        {rows !== undefined && filtered.map((loc) => {
           const meta = typeMeta(loc.type);
           return (
             <View key={loc.id} style={styles.card}>
@@ -275,7 +345,7 @@ export default function SavedLocationsScreen() {
           );
         })}
 
-        {filtered.length === 0 && (
+        {rows !== undefined && filtered.length === 0 && (
           <View style={styles.empty}>
             <MaterialIcons name="location-off" size={36} color={Colors.outline} />
             <Text style={styles.emptyTitle}>{search ? 'No matches' : 'No saved locations yet'}</Text>
@@ -344,8 +414,8 @@ export default function SavedLocationsScreen() {
                   onChangeText={(area) => setForm({ ...form, area })}
                 />
 
-                <TouchableOpacity style={[styles.cta, styles.sheetCta]} onPress={saveForm} activeOpacity={0.8}>
-                  <Text style={styles.ctaText}>{isEditing ? 'Save changes' : 'Save location'}</Text>
+                <TouchableOpacity style={[styles.cta, styles.sheetCta, saving && styles.ctaDisabled]} onPress={saveForm} activeOpacity={0.8} disabled={saving}>
+                  {saving ? <ActivityIndicator color={Colors.onSecondary} /> : <Text style={styles.ctaText}>{isEditing ? 'Save changes' : 'Save location'}</Text>}
                 </TouchableOpacity>
               </ScrollView>
             </View>
@@ -366,6 +436,7 @@ const shadow = {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
+  centered: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12, padding: 24, backgroundColor: Colors.background },
   content: { padding: 16 },
   flex: { flex: 1 },
   bold: { fontWeight: '700' },

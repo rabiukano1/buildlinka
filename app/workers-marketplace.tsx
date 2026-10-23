@@ -1,658 +1,207 @@
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useState } from 'react';
 import {
-  View,
-  Text,
-  FlatList,
-  StyleSheet,
-  TouchableOpacity,
-  RefreshControl,
-  Animated,
-  Modal,
-  TextInput,
-  KeyboardAvoidingView,
-  Platform,
-  ScrollView,
+  View, Text, StyleSheet, TouchableOpacity, TextInput, ScrollView, ActivityIndicator, Image,
 } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
 import { MaterialIcons } from '@expo/vector-icons';
+import { useQuery } from 'convex/react';
+import { api } from '../convex/_generated/api';
 import { Colors } from '../constants/Colors';
-import { WORKERS, TRADES, type Worker } from '../constants/MockData';
-import SearchBar from '../components/SearchBar';
-import WorkerCard from '../components/WorkerCard';
+import { formatPrice } from '../lib/backend';
 
-const formatPrice = (price: number) => '₦' + price.toLocaleString('en-NG');
-
-const TRADE_ICONS: Record<string, string> = {
-  All: 'people',
-  Mason: 'architecture',
-  Electrician: 'bolt',
-  Plumber: 'water',
-  Carpenter: 'handyman',
-  Painter: 'format-paint',
-  Welder: 'whatshot',
-  Tiler: 'grid-view',
-  Designer: 'palette',
-};
+const TRADES = ['All', 'Mason', 'Carpenter', 'Electrician', 'Plumber', 'Painter', 'Welder', 'Tiler', 'Roofer'];
 
 export default function WorkersMarketplaceScreen() {
   const router = useRouter();
-  const [searchQuery, setSearchQuery] = useState('');
-  const [selectedTrade, setSelectedTrade] = useState('All');
-  const [availableOnly, setAvailableOnly] = useState(false);
-  const [refreshing, setRefreshing] = useState(false);
-  const [selectedWorker, setSelectedWorker] = useState<Worker | null>(null);
-  const [showHireModal, setShowHireModal] = useState(false);
-  const [hireDate, setHireDate] = useState('');
-  const [hireDuration, setHireDuration] = useState('');
-  const [hireDescription, setHireDescription] = useState('');
-  const [hireSubmitted, setHireSubmitted] = useState(false);
+  const [tab, setTab] = useState<'workers' | 'jobs'>('workers');
+  const [trade, setTrade] = useState('All');
+  const [search, setSearch] = useState('');
 
-  const filterAnim = useRef(new Animated.Value(0)).current;
+  const workers = useQuery(api.workers.list, {
+    search: search.trim() || undefined,
+    trade: trade === 'All' ? undefined : trade,
+  });
+  const jobs = useQuery(api.jobs.list, { limit: 60 });
+  const me = useQuery(api.users.me);
 
-  const onRefresh = useCallback(() => {
-    setRefreshing(true);
-    setTimeout(() => setRefreshing(false), 1000);
-  }, []);
-
-  const filteredWorkers = useMemo(() => {
-    let list = WORKERS;
-
-    if (selectedTrade !== 'All') {
-      list = list.filter((w) =>
-        w.trade.toLowerCase().includes(selectedTrade.toLowerCase())
-      );
-    }
-
-    if (availableOnly) {
-      list = list.filter((w) => w.available);
-    }
-
-    if (searchQuery) {
-      const q = searchQuery.toLowerCase();
-      list = list.filter(
-        (w) =>
-          w.name.toLowerCase().includes(q) ||
-          w.trade.toLowerCase().includes(q) ||
-          w.skills.some((s) => s.toLowerCase().includes(q)) ||
-          w.location.toLowerCase().includes(q)
-      );
-    }
-
-    return list;
-  }, [searchQuery, selectedTrade, availableOnly]);
-
-  const handleHire = (worker: Worker) => {
-    if (!worker.available) return;
-    setSelectedWorker(worker);
-    setHireDate('');
-    setHireDuration('');
-    setHireDescription('');
-    setHireSubmitted(false);
-    setShowHireModal(true);
-  };
-
-  const submitHireRequest = () => {
-    setHireSubmitted(true);
-  };
-
-  const resetHireModal = () => {
-    setShowHireModal(false);
-    setSelectedWorker(null);
-    setHireSubmitted(false);
-  };
-
-  const renderWorker = ({ item }: { item: Worker }) => (
-    <WorkerCard
-      worker={item}
-      onPress={() => handleHire(item)}
-    />
-  );
-
-  const renderHeader = () => (
-    <View>
-      <TouchableOpacity style={styles.nearbyStrip} onPress={() => router.push('/nearby' as any)} activeOpacity={0.7}>
-        <MaterialIcons name="near-me" size={18} color={Colors.primary} />
-        <Text style={styles.nearbyStripText}>Find workers & jobs near you</Text>
-        <MaterialIcons name="chevron-right" size={18} color={Colors.primary} />
-      </TouchableOpacity>
-
-      <View style={styles.topBar}>
-        <SearchBar
-          placeholder="Search workers by name, skill, or location..."
-          onSearch={setSearchQuery}
-        />
-      </View>
-
-      <View style={styles.chipStrip}>
-        <FlatList
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          data={TRADES}
-          keyExtractor={(item) => item}
-          contentContainerStyle={styles.chipStripInner}
-          renderItem={({ item }) => (
-            <TouchableOpacity
-              style={[styles.tradeChip, selectedTrade === item && styles.tradeChipActive]}
-              onPress={() => setSelectedTrade(item)}
-            >
-              <MaterialIcons
-                name={(TRADE_ICONS[item] || 'work') as any}
-                size={15}
-                color={selectedTrade === item ? '#fff' : Colors.textMedium}
-              />
-              <Text
-                style={[
-                  styles.tradeChipText,
-                  selectedTrade === item && styles.tradeChipTextActive,
-                ]}
-              >
-                {item}
-              </Text>
-            </TouchableOpacity>
-          )}
-        />
-      </View>
-
-      <View style={styles.quickFilters}>
-        <TouchableOpacity
-          style={[styles.qfBtn, availableOnly && styles.qfBtnActive]}
-          onPress={() => setAvailableOnly(!availableOnly)}
-        >
-          <MaterialIcons
-            name="check-circle"
-            size={16}
-            color={availableOnly ? '#fff' : Colors.lightGreen}
-          />
-          <Text style={[styles.qfBtnText, availableOnly && styles.qfBtnTextActive]}>
-            Available Only
-          </Text>
-        </TouchableOpacity>
-        <View style={styles.qfSpacer} />
-        <View style={styles.qfCount}>
-          <Text style={styles.qfCountText}>{filteredWorkers.length}</Text>
-          <Text style={styles.qfCountLabel}>pros</Text>
-        </View>
-      </View>
-    </View>
-  );
+  const myWorker = useQuery(api.workers.mine, me ? {} : 'skip');
 
   return (
     <View style={styles.container}>
-      <Stack.Screen
-        options={{
-          headerShown: true,
-          headerTitle: 'Workers Marketplace',
-          headerBackTitle: 'Back',
-          headerTintColor: Colors.primary,
-        }}
-      />
-      <FlatList
-        data={filteredWorkers}
-        renderItem={renderWorker}
-        keyExtractor={(item) => item.id}
-        ListHeaderComponent={renderHeader}
-        ListHeaderComponentStyle={styles.listHeader}
-        contentContainerStyle={styles.listContent}
-        showsVerticalScrollIndicator={false}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.primaryGreen} />
-        }
-        ListEmptyComponent={
-          <View style={styles.empty}>
-            <MaterialIcons name="person-search" size={52} color={Colors.border} />
-            <Text style={styles.emptyTitle}>No workers found</Text>
-            <Text style={styles.emptySubtitle}>
-              Try adjusting your search or filters
-            </Text>
-          </View>
-        }
-      />
+      <Stack.Screen options={{ headerTitle: 'Hire Workers' }} />
+      <View style={styles.tabs}>
+        {(['workers', 'jobs'] as const).map((t) => (
+          <TouchableOpacity key={t} style={[styles.tab, tab === t && styles.tabActive]} onPress={() => setTab(t)}>
+            <Text style={[styles.tabText, tab === t && styles.tabTextActive]}>{t === 'workers' ? 'Workers' : 'Open jobs'}</Text>
+          </TouchableOpacity>
+        ))}
+      </View>
 
-      <Modal
-        visible={showHireModal}
-        animationType="slide"
-        transparent
-        onRequestClose={resetHireModal}
-      >
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          style={styles.modalOverlay}
-        >
-          <View style={styles.modalContainer}>
-            {hireSubmitted ? (
-              <View style={styles.modalSuccess}>
-                <MaterialIcons name="check-circle" size={64} color={Colors.success} />
-                <Text style={styles.modalSuccessTitle}>Hire Request Sent!</Text>
-                <Text style={styles.modalSuccessText}>
-                  Your hire request for {selectedWorker?.name} has been submitted.
-                  They will review and respond shortly.
-                </Text>
-                <TouchableOpacity style={styles.modalDoneBtn} onPress={resetHireModal}>
-                  <Text style={styles.modalDoneBtnText}>Done</Text>
-                </TouchableOpacity>
+      {tab === 'workers' ? (
+        <>
+          <View style={styles.searchBar}>
+            <MaterialIcons name="search" size={20} color={Colors.outline} />
+            <TextInput
+              style={styles.searchInput}
+              placeholder="Search trade, name or location"
+              placeholderTextColor={Colors.outline}
+              value={search}
+              onChangeText={setSearch}
+            />
+            {search ? (
+              <TouchableOpacity onPress={() => setSearch('')} hitSlop={8}>
+                <MaterialIcons name="close" size={18} color={Colors.outline} />
+              </TouchableOpacity>
+            ) : null}
+          </View>
+
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
+            {TRADES.map((t) => (
+              <TouchableOpacity key={t} style={[styles.chip, trade === t && styles.chipActive]} onPress={() => setTrade(t)}>
+                <Text style={[styles.chipText, trade === t && styles.chipTextActive]}>{t}</Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+
+          <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+            {!myWorker && (
+              <TouchableOpacity style={styles.cta} activeOpacity={0.85} onPress={() => router.push('/worker-dashboard' as any)}>
+                <View style={styles.ctaIcon}><MaterialIcons name="handyman" size={22} color={Colors.onPrimary} /></View>
+                <View style={styles.flex}>
+                  <Text style={styles.ctaTitle}>Offer your skills</Text>
+                  <Text style={styles.ctaSub}>Create a worker profile and start getting jobs.</Text>
+                </View>
+                <MaterialIcons name="chevron-right" size={22} color={Colors.onPrimary} />
+              </TouchableOpacity>
+            )}
+
+            {workers === undefined ? (
+              <ActivityIndicator style={{ marginTop: 32 }} color={Colors.primary} />
+            ) : workers.length === 0 ? (
+              <View style={styles.empty}>
+                <MaterialIcons name="engineering" size={44} color={Colors.outline} />
+                <Text style={styles.emptyTitle}>No workers match that search</Text>
+                <Text style={styles.emptySub}>Try another trade or clear the filters.</Text>
               </View>
             ) : (
-              <>
-                <View style={styles.modalHeader}>
-                  <Text style={styles.modalTitle}>Hire {selectedWorker?.name}</Text>
-                  <TouchableOpacity onPress={resetHireModal}>
-                    <MaterialIcons name="close" size={24} color={Colors.textMedium} />
-                  </TouchableOpacity>
-                </View>
-
-                {selectedWorker && (
-                  <View style={styles.modalWorkerInfo}>
-                    <Text style={styles.modalWorkerEmoji}>{selectedWorker.avatar}</Text>
-                    <View style={styles.modalWorkerDetails}>
-                      <Text style={styles.modalWorkerName}>{selectedWorker.name}</Text>
-                      <Text style={styles.modalWorkerTrade}>{selectedWorker.trade}</Text>
-                      <Text style={styles.modalWorkerRate}>
-                        {formatPrice(selectedWorker.dailyRate)} / day
-                      </Text>
+              workers.map((w) => (
+                <TouchableOpacity key={w._id} style={styles.card} activeOpacity={0.8} onPress={() => router.push('/worker-dashboard' as any)}>
+                  <View style={styles.avatar}>
+                    {w.photoUrl ? <Image source={{ uri: w.photoUrl }} style={styles.avatarImg} /> : <Text style={styles.avatarText}>{w.name.charAt(0).toUpperCase()}</Text>}
+                  </View>
+                  <View style={styles.flex}>
+                    <View style={styles.nameRow}>
+                      <Text style={styles.name} numberOfLines={1}>{w.name}</Text>
+                      {w.verified && <MaterialIcons name="verified" size={15} color={Colors.primary} />}
+                    </View>
+                    <Text style={styles.meta}>{w.trade} · {w.experienceYears} yrs exp</Text>
+                    <View style={styles.ratingRow}>
+                      <MaterialIcons name="star" size={14} color={Colors.amber} />
+                      <Text style={styles.rating}>{w.rating.toFixed(1)} ({w.reviewCount})</Text>
+                      <Text style={styles.dot}>·</Text>
+                      <Text style={styles.meta}>{w.jobsDone} jobs</Text>
+                    </View>
+                    <View style={styles.locationRow}>
+                      <MaterialIcons name="place" size={13} color={Colors.outline} />
+                      <Text style={styles.location} numberOfLines={1}>{w.location}</Text>
                     </View>
                   </View>
-                )}
-
-                <ScrollView
-                  style={[styles.modalForm, { maxHeight: 400 }]}
-                  contentContainerStyle={{ paddingBottom: 24 }}
-                  keyboardShouldPersistTaps="handled"
-                  showsVerticalScrollIndicator={false}
-                >
-                  <Text style={styles.formLabel}>Start Date</Text>
-                  <TextInput
-                    style={styles.formInput}
-                    placeholder="e.g. 15 June 2026"
-                    placeholderTextColor={Colors.textMuted}
-                    value={hireDate}
-                    onChangeText={setHireDate}
-                  />
-
-                  <Text style={styles.formLabel}>Duration (days)</Text>
-                  <TextInput
-                    style={styles.formInput}
-                    placeholder="e.g. 5"
-                    placeholderTextColor={Colors.textMuted}
-                    value={hireDuration}
-                    onChangeText={setHireDuration}
-                    keyboardType="number-pad"
-                  />
-
-                  <Text style={styles.formLabel}>Job Description</Text>
-                  <TextInput
-                    style={[styles.formInput, styles.formTextArea]}
-                    placeholder="Describe the work to be done..."
-                    placeholderTextColor={Colors.textMuted}
-                    value={hireDescription}
-                    onChangeText={setHireDescription}
-                    multiline
-                    numberOfLines={4}
-                    textAlignVertical="top"
-                  />
-
-                  {selectedWorker && hireDate && hireDuration && (
-                    <View style={styles.modalSummary}>
-                      <Text style={styles.modalSummaryTitle}>Estimated Cost</Text>
-                      <View style={styles.modalSummaryRow}>
-                        <Text style={styles.modalSummaryLabel}>Daily Rate</Text>
-                        <Text style={styles.modalSummaryValue}>
-                          {formatPrice(selectedWorker.dailyRate)}
-                        </Text>
-                      </View>
-                      <View style={styles.modalSummaryRow}>
-                        <Text style={styles.modalSummaryLabel}>Duration</Text>
-                        <Text style={styles.modalSummaryValue}>{hireDuration} day(s)</Text>
-                      </View>
-                      <View style={[styles.modalSummaryRow, styles.modalSummaryTotal]}>
-                        <Text style={styles.modalSummaryTotalLabel}>Estimated Total</Text>
-                        <Text style={styles.modalSummaryTotalValue}>
-                          {formatPrice(selectedWorker.dailyRate * parseInt(hireDuration || '0'))}
-                        </Text>
-                      </View>
+                  <View style={styles.rateCol}>
+                    <Text style={styles.rate}>{formatPrice(w.hourlyRate)}</Text>
+                    <Text style={styles.rateUnit}>/hour</Text>
+                    <View style={[styles.available, !w.available && styles.unavailable]}>
+                      <Text style={[styles.availableText, !w.available && styles.unavailableText]}>{w.available ? 'Available' : 'Busy'}</Text>
                     </View>
-                  )}
-
-                  <TouchableOpacity
-                    style={[
-                      styles.submitBtn,
-                      (!hireDate || !hireDuration) && styles.submitBtnDisabled,
-                    ]}
-                    disabled={!hireDate || !hireDuration}
-                    onPress={submitHireRequest}
-                  >
-                    <MaterialIcons name="send" size={18} color="#fff" />
-                    <Text style={styles.submitBtnText}>Send Hire Request</Text>
-                  </TouchableOpacity>
-                </ScrollView>
-              </>
+                  </View>
+                </TouchableOpacity>
+              ))
             )}
-          </View>
-        </KeyboardAvoidingView>
-      </Modal>
+          </ScrollView>
+        </>
+      ) : (
+        <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+          <TouchableOpacity style={styles.postJob} activeOpacity={0.85} onPress={() => router.push('/create-work' as any)}>
+            <MaterialIcons name="post-add" size={20} color={Colors.onPrimary} />
+            <Text style={styles.postJobText}>Post a job</Text>
+          </TouchableOpacity>
+          {jobs === undefined ? (
+            <ActivityIndicator style={{ marginTop: 32 }} color={Colors.primary} />
+          ) : jobs.length === 0 ? (
+            <View style={styles.empty}>
+              <MaterialIcons name="work-off" size={44} color={Colors.outline} />
+              <Text style={styles.emptyTitle}>No open jobs yet</Text>
+              <Text style={styles.emptySub}>Post the first one and workers will apply.</Text>
+            </View>
+          ) : jobs.map((j) => (
+            <View key={j._id} style={styles.jobCard}>
+              <View style={styles.jobTop}>
+                <Text style={styles.jobTitle} numberOfLines={2}>{j.title}</Text>
+                <Text style={styles.jobBudget}>{formatPrice(j.budget)}</Text>
+              </View>
+              <Text style={styles.jobMeta}>{j.trade} · {j.location}</Text>
+              <Text style={styles.jobDesc} numberOfLines={2}>{j.description}</Text>
+              <View style={styles.jobFoot}>
+                <Text style={styles.jobMeta}>{j.applicationCount} applicant{j.applicationCount === 1 ? '' : 's'}</Text>
+                <Text style={styles.jobPoster}>by {j.posterName}</Text>
+              </View>
+            </View>
+          ))}
+        </ScrollView>
+      )}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: Colors.background,
-  },
-
-  /* ─── Top bar ─── */
-  topBar: {
-    paddingHorizontal: 16,
-    paddingTop: 12,
-    paddingBottom: 4,
-  },
-
-  /* ─── Trade chips ─── */
-  chipStrip: {
-    marginTop: 10,
-  },
-  chipStripInner: {
-    paddingHorizontal: 16,
-    gap: 8,
-  },
-  tradeChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 99,
-    backgroundColor: Colors.card,
-    borderWidth: 1,
-    borderColor: Colors.outlineVariant,
-  },
-  tradeChipActive: {
-    backgroundColor: Colors.primary,
-    borderColor: Colors.primary,
-  },
-  tradeChipText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: Colors.textMedium,
-  },
-  tradeChipTextActive: {
-    color: '#fff',
-  },
-
-  /* ─── Quick filters ─── */
-  quickFilters: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    paddingHorizontal: 16,
-    marginTop: 12,
-    marginBottom: 4,
-  },
-  qfBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    backgroundColor: Colors.card,
-    borderRadius: 99,
-    paddingHorizontal: 14,
-    paddingVertical: 9,
-    borderWidth: 1,
-    borderColor: Colors.outlineVariant,
-  },
-  qfBtnActive: {
-    backgroundColor: Colors.primary,
-    borderColor: Colors.primary,
-  },
-  qfBtnText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: Colors.textMedium,
-  },
-  qfBtnTextActive: {
-    color: '#fff',
-  },
-  qfSpacer: {
-    flex: 1,
-  },
-  qfCount: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
-    gap: 4,
-    backgroundColor: Colors.primaryGreen,
-    borderRadius: 10,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-  },
-  qfCountText: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  qfCountLabel: {
-    color: 'rgba(255,255,255,0.7)',
-    fontSize: 10,
-    fontWeight: '500',
-  },
-
-  /* ─── FlatList ─── */
-  listHeader: {
-    flexGrow: 0,
-  },
-  listContent: {
-    paddingHorizontal: 16,
-    paddingBottom: 24,
-    flexGrow: 1,
-  },
-
-  /* ─── Empty ─── */
-  empty: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingTop: 80,
-    gap: 8,
-  },
-  emptyTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: Colors.textDark,
-  },
-  emptySubtitle: {
-    fontSize: 13,
-    color: Colors.textLight,
-  },
-
-  /* ─── Hire Modal ─── */
-  modalOverlay: {
-    flex: 1,
-    justifyContent: 'flex-end',
-    backgroundColor: 'rgba(0,0,0,0.4)',
-  },
-  modalContainer: {
-    backgroundColor: Colors.card,
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    maxHeight: '85%',
-    paddingTop: 20,
-    paddingHorizontal: 20,
-    paddingBottom: 32,
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  modalTitle: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: Colors.textDark,
-  },
-  modalWorkerInfo: {
-    flexDirection: 'row',
-    gap: 14,
-    alignItems: 'center',
-    backgroundColor: Colors.surface,
-    borderRadius: 12,
-    padding: 14,
-    marginBottom: 20,
-  },
-  modalWorkerEmoji: {
-    fontSize: 36,
-  },
-  modalWorkerDetails: {
-    flex: 1,
-    gap: 2,
-  },
-  modalWorkerName: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: Colors.textDark,
-  },
-  modalWorkerTrade: {
-    fontSize: 13,
-    color: Colors.primaryGreen,
-    fontWeight: '600',
-  },
-  modalWorkerRate: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: Colors.secondary,
-  },
-  modalForm: {
-    gap: 0,
-  },
-  formLabel: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: Colors.textMedium,
-    marginBottom: 6,
-    marginTop: 12,
-  },
-  formInput: {
-    backgroundColor: Colors.surface,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: Colors.outlineVariant,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    fontSize: 15,
-    color: Colors.textDark,
-  },
-  formTextArea: {
-    minHeight: 80,
-    paddingTop: 12,
-  },
-  modalSummary: {
-    marginTop: 20,
-    backgroundColor: Colors.surface,
-    borderRadius: 12,
-    padding: 14,
-    gap: 8,
-  },
-  modalSummaryTitle: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: Colors.textDark,
-    marginBottom: 4,
-  },
-  modalSummaryRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  modalSummaryLabel: {
-    fontSize: 13,
-    color: Colors.textMedium,
-  },
-  modalSummaryValue: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: Colors.textDark,
-  },
-  modalSummaryTotal: {
-    borderTopWidth: 1,
-    borderTopColor: Colors.outlineVariant,
-    paddingTop: 8,
-    marginTop: 4,
-  },
-  modalSummaryTotalLabel: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: Colors.textDark,
-  },
-  modalSummaryTotalValue: {
-    fontSize: 16,
-    fontWeight: '800',
-    color: Colors.secondary,
-  },
-  submitBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    backgroundColor: Colors.secondary,
-    borderRadius: 99,
-    paddingVertical: 14,
-    marginTop: 20,
-  },
-  submitBtnDisabled: {
-    backgroundColor: Colors.border,
-  },
-  submitBtnText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '700',
-  },
-
-  /* ─── Hire Success ─── */
-  modalSuccess: {
-    alignItems: 'center',
-    gap: 12,
-    paddingVertical: 40,
-    paddingHorizontal: 20,
-  },
-  modalSuccessTitle: {
-    fontSize: 22,
-    fontWeight: '700',
-    color: Colors.textDark,
-  },
-  modalSuccessText: {
-    fontSize: 14,
-    color: Colors.textMedium,
-    textAlign: 'center',
-    lineHeight: 20,
-  },
-  modalDoneBtn: {
-    backgroundColor: Colors.primary,
-    borderRadius: 99,
-    paddingHorizontal: 40,
-    paddingVertical: 12,
-    marginTop: 16,
-  },
-  modalDoneBtnText: {
-    color: '#fff',
-    fontSize: 15,
-    fontWeight: '700',
-  },
-
-  /* ─── Nearby Strip ─── */
-  nearbyStrip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: Colors.primary + '0C',
-    marginHorizontal: 16,
-    marginTop: 8,
-    marginBottom: 4,
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    gap: 8,
-    borderWidth: 1,
-    borderColor: Colors.primary + '18',
-  },
-  nearbyStripText: {
-    flex: 1,
-    fontSize: 13,
-    fontWeight: '600',
-    color: Colors.primary,
-  },
+  container: { flex: 1, backgroundColor: Colors.background },
+  flex: { flex: 1 },
+  tabs: { flexDirection: 'row', margin: 16, marginBottom: 8, padding: 4, borderRadius: 999, backgroundColor: Colors.surfaceVariant },
+  tab: { flex: 1, height: 40, borderRadius: 999, alignItems: 'center', justifyContent: 'center' },
+  tabActive: { backgroundColor: Colors.card, shadowColor: '#000', shadowOpacity: 0.08, shadowRadius: 4, elevation: 2 },
+  tabText: { fontSize: 14, fontWeight: '600', color: Colors.onSurfaceVariant },
+  tabTextActive: { color: Colors.primary },
+  searchBar: { flexDirection: 'row', alignItems: 'center', gap: 10, marginHorizontal: 16, height: 48, paddingHorizontal: 14, borderRadius: 999, backgroundColor: Colors.card, borderWidth: 1, borderColor: Colors.outlineVariant },
+  searchInput: { flex: 1, fontSize: 15, color: Colors.onSurface, paddingVertical: 0 },
+  chips: { gap: 8, paddingHorizontal: 16, paddingVertical: 12 },
+  chip: { height: 34, paddingHorizontal: 14, borderRadius: 999, justifyContent: 'center', backgroundColor: Colors.card, borderWidth: 1, borderColor: Colors.outlineVariant },
+  chipActive: { backgroundColor: Colors.primary, borderColor: Colors.primary },
+  chipText: { fontSize: 13, fontWeight: '600', color: Colors.onSurfaceVariant },
+  chipTextActive: { color: Colors.onPrimary },
+  content: { padding: 16, paddingTop: 4, paddingBottom: 40 },
+  cta: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14, borderRadius: 14, backgroundColor: Colors.primary, marginBottom: 12 },
+  ctaIcon: { width: 42, height: 42, borderRadius: 21, backgroundColor: 'rgba(255,255,255,0.18)', alignItems: 'center', justifyContent: 'center' },
+  ctaTitle: { fontSize: 15, fontWeight: '700', color: Colors.onPrimary },
+  ctaSub: { fontSize: 12, color: 'rgba(255,255,255,0.8)', marginTop: 2 },
+  card: { flexDirection: 'row', gap: 12, padding: 14, borderRadius: 14, backgroundColor: Colors.card, marginBottom: 10, borderWidth: 1, borderColor: Colors.outlineVariant },
+  avatar: { width: 52, height: 52, borderRadius: 26, backgroundColor: Colors.greenTint, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+  avatarImg: { width: 52, height: 52 },
+  avatarText: { fontSize: 20, fontWeight: '700', color: Colors.primary },
+  nameRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  name: { fontSize: 15, fontWeight: '700', color: Colors.onSurface, flexShrink: 1 },
+  meta: { fontSize: 12, color: Colors.outline, marginTop: 2 },
+  ratingRow: { flexDirection: 'row', alignItems: 'center', gap: 3, marginTop: 4 },
+  rating: { fontSize: 12, fontWeight: '600', color: Colors.onSurfaceVariant },
+  dot: { fontSize: 12, color: Colors.outline },
+  locationRow: { flexDirection: 'row', alignItems: 'center', gap: 2, marginTop: 4 },
+  location: { fontSize: 12, color: Colors.outline, flex: 1 },
+  rateCol: { alignItems: 'flex-end' },
+  rate: { fontSize: 14, fontWeight: '800', color: Colors.primary },
+  rateUnit: { fontSize: 10, color: Colors.outline },
+  available: { marginTop: 6, paddingHorizontal: 8, paddingVertical: 2, borderRadius: 999, backgroundColor: Colors.greenTint },
+  unavailable: { backgroundColor: Colors.surfaceVariant },
+  availableText: { fontSize: 10, fontWeight: '700', color: Colors.primary },
+  unavailableText: { color: Colors.outline },
+  empty: { alignItems: 'center', paddingTop: 48, gap: 8 },
+  emptyTitle: { fontSize: 17, fontWeight: '700', color: Colors.onSurface, textAlign: 'center' },
+  emptySub: { fontSize: 13, color: Colors.outline, textAlign: 'center' },
+  postJob: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, height: 48, borderRadius: 999, backgroundColor: Colors.primary, marginBottom: 16 },
+  postJobText: { fontSize: 15, fontWeight: '700', color: Colors.onPrimary },
+  jobCard: { padding: 16, borderRadius: 14, backgroundColor: Colors.card, marginBottom: 10, borderWidth: 1, borderColor: Colors.outlineVariant },
+  jobTop: { flexDirection: 'row', justifyContent: 'space-between', gap: 12 },
+  jobTitle: { flex: 1, fontSize: 15, fontWeight: '700', color: Colors.onSurface },
+  jobBudget: { fontSize: 14, fontWeight: '800', color: Colors.primary },
+  jobMeta: { fontSize: 12, color: Colors.outline, marginTop: 4 },
+  jobDesc: { fontSize: 13, color: Colors.onSurfaceVariant, marginTop: 6, lineHeight: 18 },
+  jobFoot: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 10 },
+  jobPoster: { fontSize: 12, color: Colors.outline },
 });

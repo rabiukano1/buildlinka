@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef, useEffect } from 'react';
+import { Component, useMemo, useRef, useEffect, type ReactNode } from 'react';
 import {
   View,
   Text,
@@ -6,65 +6,51 @@ import {
   StyleSheet,
   TouchableOpacity,
   Animated,
+  ActivityIndicator,
 } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
 import { MaterialIcons } from '@expo/vector-icons';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useQuery } from 'convex/react';
+import { api } from '../convex/_generated/api';
+import { formatPrice } from '../lib/backend';
 import { Colors } from '../constants/Colors';
 
-const formatPrice = (price: number) => '₦' + price.toLocaleString('en-NG');
-const formatCount = (n: number) => n >= 1000 ? (n / 1000).toFixed(1) + 'k' : String(n);
+/** Shown when the signed-in user has no store yet (store queries throw then). */
+function NoStoreState() {
+  const router = useRouter();
+  return (
+    <View style={styles.centerWrap}>
+      <View style={styles.emptyIconWrap}>
+        <MaterialIcons name="store" size={36} color={Colors.primary} />
+      </View>
+      <Text style={styles.emptyTitle}>Create your store first</Text>
+      <Text style={styles.emptySub}>
+        You need a vendor store before you can see sales analytics.
+      </Text>
+      <TouchableOpacity
+        style={styles.primaryBtn}
+        onPress={() => router.push('/create-store' as any)}
+        activeOpacity={0.8}
+      >
+        <MaterialIcons name="add-business" size={18} color={Colors.onPrimary} />
+        <Text style={styles.primaryBtnText}>Create your store</Text>
+      </TouchableOpacity>
+    </View>
+  );
+}
 
-const TIMEFRAMES = ['Day', 'Week', 'Month', 'Year'] as const;
-type Timeframe = typeof TIMEFRAMES[number];
-
-const REVENUE_DATA: Record<Timeframe, { label: string; value: number }[]> = {
-  Day: [
-    { label: '6AM', value: 12000 },
-    { label: '9AM', value: 45000 },
-    { label: '12PM', value: 62000 },
-    { label: '3PM', value: 38000 },
-    { label: '6PM', value: 55000 },
-    { label: '9PM', value: 28000 },
-  ],
-  Week: [
-    { label: 'Mon', value: 180000 },
-    { label: 'Tue', value: 145000 },
-    { label: 'Wed', value: 220000 },
-    { label: 'Thu', value: 195000 },
-    { label: 'Fri', value: 280000 },
-    { label: 'Sat', value: 320000 },
-    { label: 'Sun', value: 120000 },
-  ],
-  Month: [
-    { label: 'Wk 1', value: 980000 },
-    { label: 'Wk 2', value: 1120000 },
-    { label: 'Wk 3', value: 850000 },
-    { label: 'Wk 4', value: 1350000 },
-  ],
-  Year: [
-    { label: 'Jan', value: 520000 },
-    { label: 'Feb', value: 480000 },
-    { label: 'Mar', value: 750000 },
-    { label: 'Apr', value: 680000 },
-    { label: 'May', value: 920000 },
-    { label: 'Jun', value: 880000 },
-    { label: 'Jul', value: 1050000 },
-    { label: 'Aug', value: 980000 },
-    { label: 'Sep', value: 1120000 },
-    { label: 'Oct', value: 1250000 },
-    { label: 'Nov', value: 1180000 },
-    { label: 'Dec', value: 1420000 },
-  ],
-};
-
-const BEST_PRODUCTS = [
-  { rank: 1, name: 'Dangote Cement 42.5R (50kg)', emoji: '🏗️', units: 342, revenue: 2907000 },
-  { rank: 2, name: 'Ceramic Floor Tiles 60x60cm', emoji: '🏛️', units: 198, revenue: 693000 },
-  { rank: 3, name: 'Iron Rod 12mm (6m)', emoji: '⚙️', units: 156, revenue: 1060800 },
-  { rank: 4, name: 'Emulsion Paint 20L (White)', emoji: '🎨', units: 89, revenue: 1112500 },
-  { rank: 5, name: 'Aluminum Roofing Sheet 0.5mm', emoji: '🏠', units: 72, revenue: 302400 },
-];
+/** Catches the ConvexError thrown when the user has no store, so the
+ *  screen shows the create-store CTA instead of crashing. */
+class StoreErrorBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
+  state = { failed: false };
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+  render() {
+    if (this.state.failed) return <NoStoreState />;
+    return this.props.children;
+  }
+}
 
 function AnimatedChartBar({ height, maxHeight, delay }: { height: number; maxHeight: number; delay: number }) {
   const anim = useRef(new Animated.Value(0)).current;
@@ -117,15 +103,145 @@ function KpiCard({
   );
 }
 
+function AnalyticsBody() {
+  const stats = useQuery(api.orders.myStoreStats);
+
+  const maxRevenue = useMemo(
+    () => Math.max(...(stats?.salesByMonth.map((d) => d.total) ?? [0]), 1),
+    [stats]
+  );
+
+  if (stats === undefined) {
+    return (
+      <View style={styles.centerWrap}>
+        <ActivityIndicator size="large" color={Colors.primary} />
+        <Text style={styles.emptySub}>Loading analytics…</Text>
+      </View>
+    );
+  }
+
+  const months = stats.salesByMonth;
+
+  return (
+    <ScrollView
+      style={styles.scrollView}
+      contentContainerStyle={styles.scrollContent}
+      showsVerticalScrollIndicator={false}
+    >
+      {/* ─── Revenue Section (real monthly sales) ─── */}
+      <View style={styles.revenueCard}>
+        <View style={styles.revenueHeader}>
+          <View>
+            <Text style={styles.revenuePeriod}>Total sales</Text>
+            <Text style={styles.revenueValue}>{formatPrice(stats.totalSales)}</Text>
+          </View>
+          <View style={styles.revenueGrowth}>
+            <MaterialIcons name="receipt-long" size={18} color={Colors.success} />
+            <Text style={styles.revenueGrowthText}>{stats.orderCount} orders</Text>
+          </View>
+        </View>
+        {months.length === 0 ? (
+          <Text style={styles.emptySub}>No sales yet. Your monthly sales chart will appear here.</Text>
+        ) : (
+          <View style={styles.chartContainer}>
+            <View style={styles.barsRow}>
+              {months.map((d, i) => (
+                <View key={d.month} style={styles.barCol}>
+                  <AnimatedChartBar
+                    height={d.total}
+                    maxHeight={maxRevenue}
+                    delay={i * 80}
+                  />
+                </View>
+              ))}
+            </View>
+            <View style={styles.barLabels}>
+              {months.map((d) => (
+                <Text key={d.month} style={styles.barLabel}>{d.month.slice(5)}</Text>
+              ))}
+            </View>
+          </View>
+        )}
+      </View>
+
+      {/* ─── KPI Grid (real numbers only) ─── */}
+      <Text style={styles.sectionTitle}>Key Metrics</Text>
+      <View style={styles.kpiGrid}>
+        <KpiCard
+          icon="trending-up"
+          label="Total Sales"
+          value={formatPrice(stats.totalSales)}
+          sub={`${stats.orderCount} orders counted`}
+          color={Colors.success}
+        />
+        <KpiCard
+          icon="shopping-cart"
+          label="Total Orders"
+          value={String(stats.orderCount)}
+          sub={`${stats.openOrders} open`}
+          color={Colors.primary}
+        />
+        <KpiCard
+          icon="inventory-2"
+          label="Live Products"
+          value={String(stats.productCount)}
+          color={Colors.tertiary}
+        />
+        <KpiCard
+          icon="warning"
+          label="Low Stock"
+          value={String(stats.lowStock.length)}
+          sub="items at or below minimum"
+          color={Colors.secondary}
+        />
+      </View>
+
+      {/* ─── Low Stock ─── */}
+      <Text style={styles.sectionTitle}>Needs Restocking</Text>
+      {stats.lowStock.length === 0 ? (
+        <View style={styles.bestProductsCard}>
+          <Text style={styles.allStocked}>All stocked up — nothing at or below minimum.</Text>
+        </View>
+      ) : (
+        <View style={styles.bestProductsCard}>
+          {stats.lowStock.map((p, i) => (
+            <View key={p._id} style={styles.bestProductRow}>
+              <View style={styles.bestRank}>
+                <Text style={styles.bestRankText}>{i + 1}</Text>
+              </View>
+              <Text style={styles.bestEmoji}>📦</Text>
+              <View style={styles.bestInfo}>
+                <Text style={styles.bestName} numberOfLines={1}>{p.name}</Text>
+                <Text style={styles.bestUnits}>{p.stock} {p.unit} left (min {p.minStock})</Text>
+              </View>
+            </View>
+          ))}
+        </View>
+      )}
+    </ScrollView>
+  );
+}
+
 export default function SalesAnalyticsScreen() {
-  const router = useRouter();
-  const [timeframe, setTimeframe] = useState<Timeframe>('Month');
+  const me = useQuery(api.users.me);
 
-  const revenueData = REVENUE_DATA[timeframe];
-  const maxRevenue = useMemo(() => Math.max(...revenueData.map((d) => d.value)), [revenueData]);
-  const totalRevenue = useMemo(() => revenueData.reduce((s, d) => s + d.value, 0), [revenueData]);
-
-  const periodLabel = timeframe === 'Day' ? 'Today' : `This ${timeframe.toLowerCase()}`;
+  if (me === undefined) {
+    return (
+      <View style={styles.container}>
+        <Stack.Screen
+          options={{
+            headerShown: true,
+            headerTitle: 'Sales Analytics',
+            headerBackTitle: 'Back',
+            headerTintColor: Colors.primary,
+          }}
+        />
+        <View style={styles.centerWrap}>
+          <ActivityIndicator size="large" color={Colors.primary} />
+        </View>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>
@@ -137,146 +253,13 @@ export default function SalesAnalyticsScreen() {
           headerTintColor: Colors.primary,
         }}
       />
-      <ScrollView
-        style={styles.scrollView}
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
-      >
-        {/* ─── Timeframe Filters ─── */}
-        <View style={styles.timeframeRow}>
-          {TIMEFRAMES.map((tf) => (
-            <TouchableOpacity
-              key={tf}
-              style={[styles.timeframeChip, timeframe === tf && styles.timeframeChipActive]}
-              onPress={() => setTimeframe(tf)}
-            >
-              <Text style={[styles.timeframeText, timeframe === tf && styles.timeframeTextActive]}>
-                {tf}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-
-        {/* ─── Revenue Section ─── */}
-        <View style={styles.revenueCard}>
-          <View style={styles.revenueHeader}>
-            <View>
-              <Text style={styles.revenuePeriod}>{periodLabel}</Text>
-              <Text style={styles.revenueValue}>{formatPrice(totalRevenue)}</Text>
-            </View>
-            <View style={styles.revenueGrowth}>
-              <MaterialIcons name="trending-up" size={18} color={Colors.success} />
-              <Text style={styles.revenueGrowthText}>+12.5%</Text>
-            </View>
-          </View>
-          <View style={styles.chartContainer}>
-            <View style={styles.barsRow}>
-              {revenueData.map((d, i) => (
-                <View key={d.label} style={styles.barCol}>
-                  <AnimatedChartBar
-                    height={d.value}
-                    maxHeight={maxRevenue}
-                    delay={i * 80}
-                  />
-                </View>
-              ))}
-            </View>
-            <View style={styles.barLabels}>
-              {revenueData.map((d) => (
-                <Text key={d.label} style={styles.barLabel}>{d.label}</Text>
-              ))}
-            </View>
-          </View>
-        </View>
-
-        {/* ─── KPI Grid ─── */}
-        <Text style={styles.sectionTitle}>Key Metrics</Text>
-        <View style={styles.kpiGrid}>
-          <KpiCard
-            icon="trending-up"
-            label="Total Revenue"
-            value={formatPrice(11450000)}
-            sub="Last 30 days"
-            color={Colors.success}
-          />
-          <KpiCard
-            icon="shopping-cart"
-            label="Total Orders"
-            value="156"
-            sub="24 pending"
-            color={Colors.primary}
-          />
-          <KpiCard
-            icon="people"
-            label="Total Customers"
-            value="89"
-            sub="12 new this month"
-            color={Colors.tertiary}
-          />
-          <KpiCard
-            icon="star"
-            label="Avg. Rating"
-            value="4.8"
-            sub="From 312 reviews"
-            color={Colors.secondary}
-          />
-        </View>
-
-        {/* ─── Conversion & Customer Insights ─── */}
-        <Text style={styles.sectionTitle}>Customer Insights</Text>
-        <View style={styles.insightsRow}>
-          <View style={styles.insightCard}>
-            <Text style={styles.insightLabel}>Conversion Rate</Text>
-            <View style={styles.insightValueRow}>
-              <Text style={styles.insightValue}>3.8%</Text>
-              <View style={styles.insightChange}>
-                <MaterialIcons name="arrow-upward" size={12} color={Colors.success} />
-                <Text style={styles.insightChangeText}>+0.6%</Text>
-              </View>
-            </View>
-            <View style={styles.insightBar}>
-              <View style={[styles.insightBarFill, { width: '38%' }]} />
-            </View>
-            <Text style={styles.insightSub}>1,892 visits → 72 orders</Text>
-          </View>
-          <View style={styles.insightCard}>
-            <Text style={styles.insightLabel}>New vs. Repeat</Text>
-            <View style={styles.donutRow}>
-              <View style={styles.donutSegment}>
-                <View style={[styles.donutCircle, { borderColor: Colors.primaryGreen, borderWidth: 4 }]}>
-                  <Text style={styles.donutPct}>62%</Text>
-                </View>
-                <Text style={styles.donutLabel}>New</Text>
-              </View>
-              <View style={styles.donutSegment}>
-                <View style={[styles.donutCircle, { borderColor: Colors.secondary, borderWidth: 4 }]}>
-                  <Text style={styles.donutPct}>38%</Text>
-                </View>
-                <Text style={styles.donutLabel}>Repeat</Text>
-              </View>
-            </View>
-            <Text style={styles.insightSub}>55 new, 34 returning customers</Text>
-          </View>
-        </View>
-
-        {/* ─── Best Selling Products ─── */}
-        <Text style={styles.sectionTitle}>Best Selling Products</Text>
-        <View style={styles.bestProductsCard}>
-          {BEST_PRODUCTS.map((p) => (
-            <View key={p.rank} style={styles.bestProductRow}>
-              <View style={styles.bestRank}>
-                <Text style={styles.bestRankText}>{p.rank}</Text>
-              </View>
-              <Text style={styles.bestEmoji}>{p.emoji}</Text>
-              <View style={styles.bestInfo}>
-                <Text style={styles.bestName} numberOfLines={1}>{p.name}</Text>
-                <Text style={styles.bestUnits}>{p.units} units sold</Text>
-              </View>
-              <Text style={styles.bestRevenue}>{formatPrice(p.revenue)}</Text>
-            </View>
-          ))}
-        </View>
-      </ScrollView>
+      {!me?.store ? (
+        <NoStoreState />
+      ) : (
+        <StoreErrorBoundary>
+          <AnalyticsBody />
+        </StoreErrorBoundary>
+      )}
     </View>
   );
 }
@@ -294,36 +277,12 @@ const styles = StyleSheet.create({
     paddingBottom: 32,
     gap: 16,
   },
-
-  /* ─── Timeframe ─── */
-  timeframeRow: {
-    flexDirection: 'row',
-    backgroundColor: Colors.card,
-    borderRadius: 99,
-    padding: 4,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.04,
-    shadowRadius: 2,
-    elevation: 1,
-  },
-  timeframeChip: {
+  centerWrap: {
     flex: 1,
-    paddingVertical: 10,
-    borderRadius: 99,
     alignItems: 'center',
-  },
-  timeframeChipActive: {
-    backgroundColor: Colors.primary,
-  },
-  timeframeText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: Colors.textMedium,
-  },
-  timeframeTextActive: {
-    color: '#fff',
-    fontWeight: '700',
+    justifyContent: 'center',
+    paddingHorizontal: 32,
+    gap: 8,
   },
 
   /* ─── Revenue ─── */
@@ -456,94 +415,7 @@ const styles = StyleSheet.create({
     marginTop: 1,
   },
 
-  /* ─── Insights ─── */
-  insightsRow: {
-    flexDirection: 'row',
-    gap: 10,
-  },
-  insightCard: {
-    flex: 1,
-    backgroundColor: Colors.card,
-    borderRadius: 8,
-    padding: 14,
-    gap: 8,
-    borderLeftWidth: 3,
-    borderLeftColor: Colors.secondary,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.04,
-    shadowRadius: 3,
-    elevation: 1,
-  },
-  insightLabel: {
-    fontSize: 11,
-    color: Colors.textMedium,
-    fontWeight: '600',
-  },
-  insightValueRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  insightValue: {
-    fontSize: 22,
-    fontWeight: '900',
-    color: Colors.textDark,
-  },
-  insightChange: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 2,
-  },
-  insightChangeText: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: Colors.success,
-  },
-  insightBar: {
-    height: 6,
-    backgroundColor: Colors.divider,
-    borderRadius: 3,
-    overflow: 'hidden',
-  },
-  insightBarFill: {
-    height: '100%',
-    backgroundColor: Colors.primaryGreen,
-    borderRadius: 3,
-  },
-  insightSub: {
-    fontSize: 10,
-    color: Colors.textLight,
-  },
-  donutRow: {
-    flexDirection: 'row',
-    gap: 16,
-    justifyContent: 'center',
-  },
-  donutSegment: {
-    alignItems: 'center',
-    gap: 4,
-  },
-  donutCircle: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: Colors.surface,
-  },
-  donutPct: {
-    fontSize: 13,
-    fontWeight: '800',
-    color: Colors.textDark,
-  },
-  donutLabel: {
-    fontSize: 10,
-    color: Colors.textMedium,
-    fontWeight: '600',
-  },
-
-  /* ─── Best Products ─── */
+  /* ─── Low stock list ─── */
   bestProductsCard: {
     backgroundColor: Colors.card,
     borderRadius: 8,
@@ -555,6 +427,11 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.04,
     shadowRadius: 3,
     elevation: 1,
+  },
+  allStocked: {
+    fontSize: 13,
+    color: Colors.textMedium,
+    padding: 16,
   },
   bestProductRow: {
     flexDirection: 'row',
@@ -594,9 +471,11 @@ const styles = StyleSheet.create({
     fontSize: 10,
     color: Colors.textLight,
   },
-  bestRevenue: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: Colors.primaryGreen,
-  },
+
+  /* ─── Empty ─── */
+  emptyIconWrap: { width: 72, height: 72, borderRadius: 36, backgroundColor: Colors.greenTint + '80', alignItems: 'center', justifyContent: 'center', marginBottom: 4 },
+  emptyTitle: { fontSize: 18, fontWeight: '700', color: Colors.textDark, textAlign: 'center' },
+  emptySub: { fontSize: 13, color: Colors.textLight, textAlign: 'center', paddingHorizontal: 8 },
+  primaryBtn: { flexDirection: 'row', alignItems: 'center', gap: 8, height: 48, paddingHorizontal: 24, borderRadius: 999, backgroundColor: Colors.primary, marginTop: 8 },
+  primaryBtnText: { fontSize: 15, fontWeight: '700', color: Colors.onPrimary },
 });

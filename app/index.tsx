@@ -1,4 +1,4 @@
-import { useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -13,6 +13,9 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
+import { useConvexAuth, useQuery } from 'convex/react';
+import { api } from '../convex/_generated/api';
+import { ROLE_HOME } from '../lib/backend';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors } from '../constants/Colors';
@@ -21,40 +24,95 @@ const { width, height } = Dimensions.get('window');
 
 type Slide = {
   id: string;
-  emoji: string;
+  role: string;
+  icon: string;
   title: string;
   subtitle: string;
   description: string;
+  features: string[];
   gradient: [string, string, string];
 };
 
 const SLIDES: Slide[] = [
   {
     id: '1',
-    emoji: '🏗️',
-    title: 'Premium Materials,\nDirect to You',
-    subtitle: 'Source smarter. Build stronger.',
+    role: 'BuildLinka',
+    icon: 'construction',
+    title: 'One App.\nEvery Builder.',
+    subtitle: 'Buy, sell, hire, engineer.',
     description:
-      'Browse thousands of construction materials from verified vendors across Nigeria. Quality guaranteed, prices you can trust.',
+      'BuildLinka puts Nigeria\u2019s construction market in your pocket. Pick the account type that fits you — one login holds every type, and you can switch any time.',
+    features: [
+      'One phone number, every account type',
+      'Switch Buyer, Vendor, Worker, Engineer instantly',
+      'Verified stores and secure checkout',
+    ],
     gradient: [Colors.primary, Colors.primaryContainer, Colors.primary] as [string, string, string],
   },
   {
     id: '2',
-    emoji: '👷',
-    title: 'Skilled Workers,\nOne Tap Away',
-    subtitle: 'Hire with confidence.',
+    role: 'Buyer',
+    icon: 'shopping-bag',
+    title: 'Buyer.\nSource Smarter.',
+    subtitle: 'Materials direct to site.',
     description:
-      'Connect with vetted masons, electricians, plumbers, and carpenters. View reviews, compare rates, and start your project.',
-    gradient: [Colors.secondary, Colors.secondaryContainer, Colors.secondary] as [string, string, string],
+      'Browse live catalogues from verified vendors, check out in minutes, and track every order to your site.',
+    features: [
+      'Live prices in naira, per bag, sheet, or piece',
+      'Cart, checkout & order tracking',
+      'Saved items and barcode scanner',
+      'Standard, express, or pickup delivery',
+    ],
+    gradient: ['#0d631b', '#1b7a2a', '#0d631b'] as [string, string, string],
   },
   {
     id: '3',
-    emoji: '🤝',
-    title: 'Build Nigeria.\nTogether.',
-    subtitle: 'Join 10,000+ builders nationwide.',
+    role: 'Vendor',
+    icon: 'store',
+    title: 'Vendor.\nSell Nationwide.',
+    subtitle: 'Your store, open 24/7.',
     description:
-      'One app for materials, workers, equipment — everything you need to bring your vision to life.',
-    gradient: [Colors.primary, Colors.primaryContainer, Colors.tertiary] as [string, string, string],
+      'Open your storefront in minutes, list products with photos, and manage orders, stock, and sales from one dashboard.',
+    features: [
+      'Store setup with area, city & GPS',
+      'Listings with photos, drafts & barcodes',
+      'Inventory with low-stock alerts',
+      'Orders pipeline: confirm → ship → deliver',
+      'Sales analytics by month',
+    ],
+    gradient: [Colors.secondary, Colors.secondaryContainer, Colors.secondary] as [string, string, string],
+  },
+  {
+    id: '4',
+    role: 'Worker',
+    icon: 'build',
+    title: 'Worker.\nGet Hired.',
+    subtitle: 'Your skill, your rates.',
+    description:
+      'Create your worker profile with trade, experience, and daily rate. Clients find you by trade and location.',
+    features: [
+      'Profile with trade, skills & experience',
+      'Available / busy badge',
+      'Daily rate in naira',
+      'Hire requests land in your dashboard',
+    ],
+    gradient: ['#6d5100', '#8a6a00', '#6d5100'] as [string, string, string],
+  },
+  {
+    id: '5',
+    role: 'Engineer',
+    icon: 'engineering',
+    title: 'Engineer.\nRun Projects.',
+    subtitle: 'Teams, specs, estimates.',
+    description:
+      'Plan builds with material calculators, keep specifications at hand, and coordinate your team and milestones.',
+    features: [
+      'Cement, rebar & roofing estimators',
+      'Project specs and milestones',
+      'Team coordination',
+      'Buyer + vendor access included',
+    ],
+    gradient: [Colors.tertiary, Colors.primaryContainer, Colors.tertiary] as [string, string, string],
   },
 ];
 
@@ -85,15 +143,23 @@ function SlideItem({ item, index, scrollX }: { item: Slide; index: number; scrol
       end={{ x: 0, y: 1 }}
     >
       <Animated.View style={[styles.slideContent, { opacity, transform: [{ scale }] }]}>
-        <View style={styles.emojiContainer}>
-          <View style={[styles.emojiRingInner, { borderColor: Colors.amber + '50' }]} />
-          <View style={[styles.emojiRingOuter, { borderColor: Colors.amber + '25' }]} />
-          <Text style={styles.emoji}>{item.emoji}</Text>
+        <View style={styles.rolePill}>
+          <MaterialIcons name={item.icon as never} size={14} color={Colors.primary} />
+          <Text style={styles.rolePillText}>{item.role}</Text>
         </View>
 
         <Text style={styles.title}>{item.title}</Text>
         <Text style={styles.subtitle}>{item.subtitle}</Text>
         <Text style={styles.description}>{item.description}</Text>
+
+        <View style={styles.featureList}>
+          {item.features.map((f) => (
+            <View key={f} style={styles.featureRow}>
+              <MaterialIcons name="check-circle" size={16} color={Colors.amber} />
+              <Text style={styles.featureText}>{f}</Text>
+            </View>
+          ))}
+        </View>
       </Animated.View>
     </LinearGradient>
   );
@@ -130,13 +196,19 @@ export default function OnboardingScreen() {
     }
   }, []);
 
-  const handleSkip = useCallback(() => {
-    router.replace('/persona-onboarding' as any);
-  }, []);
+  const { isLoading: authLoading, isAuthenticated } = useConvexAuth();
+  const me = useQuery(api.users.me);
 
-  const handleGetStarted = useCallback(() => {
-    router.replace('/persona-onboarding' as any);
-  }, []);
+  // Signed-in users skip the intro and land on their own dashboard.
+  useEffect(() => {
+    if (authLoading || !isAuthenticated || me === undefined) return;
+    if (me?.activeRole) router.replace(ROLE_HOME[me.activeRole] as any);
+    else router.replace('/persona-onboarding' as any);
+  }, [authLoading, isAuthenticated, me]);
+
+  const next = () => router.replace((isAuthenticated ? '/persona-onboarding' : '/sign-in') as any);
+  const handleSkip = useCallback(next, [isAuthenticated]);
+  const handleGetStarted = useCallback(next, [isAuthenticated]);
 
   const isLastSlide = page === SLIDES.length - 1;
 
@@ -266,32 +338,46 @@ const styles = StyleSheet.create({
   },
   slideContent: {
     alignItems: 'center',
-    gap: 14,
+    gap: 12,
+    width: '100%',
   },
-  emojiContainer: {
+  rolePill: {
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    width: 150,
-    height: 150,
-    marginBottom: 24,
+    gap: 6,
+    backgroundColor: 'rgba(255,255,255,0.95)',
+    borderRadius: 99,
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    marginBottom: 2,
   },
-  emoji: {
-    fontSize: 76,
-    zIndex: 2,
+  rolePillText: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: Colors.primary,
+    textTransform: 'uppercase',
+    letterSpacing: 1,
   },
-  emojiRingInner: {
-    position: 'absolute',
-    width: 120,
-    height: 120,
-    borderRadius: 60,
-    borderWidth: 1.5,
+  featureList: {
+    marginTop: 8,
+    gap: 8,
+    width: '100%',
+    maxWidth: 320,
+    backgroundColor: 'rgba(0,0,0,0.18)',
+    borderRadius: 16,
+    padding: 14,
   },
-  emojiRingOuter: {
-    position: 'absolute',
-    width: 150,
-    height: 150,
-    borderRadius: 75,
-    borderWidth: 1,
+  featureRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  featureText: {
+    flex: 1,
+    fontSize: 13.5,
+    fontWeight: '500',
+    color: 'rgba(255,255,255,0.92)',
+    lineHeight: 18,
   },
   title: {
     fontSize: 30,

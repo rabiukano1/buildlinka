@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { Component, useState, useCallback, useEffect, useRef, type ReactNode } from 'react';
 import {
   View,
   Text,
@@ -8,43 +8,62 @@ import {
   Animated,
   RefreshControl,
   StatusBar,
+  ActivityIndicator,
 } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
 import { MaterialIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useQuery, useMutation } from 'convex/react';
+import { api } from '../convex/_generated/api';
+import { formatPrice, goBackOrHome } from '../lib/backend';
 import { Colors } from '../constants/Colors';
 import { useNotifications } from '../contexts/NotificationContext';
 
-const formatPrice = (price: number) => '₦' + price.toLocaleString('en-NG');
+/** Shown when the signed-in user has no store yet (store queries throw then). */
+function NoStoreState() {
+  const router = useRouter();
+  const insets = useSafeAreaInsets();
+  return (
+    <View style={[styles.centerWrap, { paddingBottom: insets.bottom + 32 }]}>
+      <View style={styles.emptyIcon}>
+        <MaterialIcons name="store" size={36} color={Colors.primary} />
+      </View>
+      <Text style={styles.emptyTitle}>Create your store first</Text>
+      <Text style={styles.emptySub}>
+        You need a vendor store before you can see your dashboard, inventory and orders.
+      </Text>
+      <TouchableOpacity
+        style={styles.primaryBtn}
+        onPress={() => router.push('/create-store' as any)}
+        activeOpacity={0.8}
+      >
+        <MaterialIcons name="add-business" size={18} color={Colors.onPrimary} />
+        <Text style={styles.primaryBtnText}>Create your store</Text>
+      </TouchableOpacity>
+    </View>
+  );
+}
 
-const SALES_DATA = [
-  { month: 'Jan', value: 320000 },
-  { month: 'Feb', value: 280000 },
-  { month: 'Mar', value: 450000 },
-  { month: 'Apr', value: 380000 },
-  { month: 'May', value: 520000 },
-  { month: 'Jun', value: 480000 },
-];
-
-const RECENT_ORDERS = [
-  { id: 'ORD-101', customer: 'Musa Bello', item: 'Dangote Cement (50kg) x 3', total: 25500, status: 'pending', date: '2 hours ago' },
-  { id: 'ORD-102', customer: 'Chioma Ade', item: 'Iron Rod 12mm x 5', total: 34000, status: 'shipped', date: '5 hours ago' },
-  { id: 'ORD-103', customer: 'Yakubu Sani', item: 'Ceramic Tiles 60x60 x 2', total: 7000, status: 'delivered', date: '1 day ago' },
-  { id: 'ORD-104', customer: 'Folake Ojo', item: 'Emulsion Paint 20L x 1', total: 12500, status: 'pending', date: '1 day ago' },
-  { id: 'ORD-105', customer: 'Daniel Eze', item: 'Roofing Sheet x 4', total: 16800, status: 'delivered', date: '3 days ago' },
-];
-
-const STOCK_ALERTS = [
-  { id: 's1', item: 'Dangote Cement', qty: 4, minQty: 10 },
-  { id: 's2', item: 'Iron Rod 12mm', qty: 2, minQty: 8 },
-  { id: 's3', item: 'PVC Pipe 3/4"', qty: 0, minQty: 15 },
-];
+/** Catches the ConvexError thrown when the user has no store, so the
+ *  screen shows the create-store CTA instead of crashing. */
+class StoreErrorBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
+  state = { failed: false };
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+  render() {
+    if (this.state.failed) return <NoStoreState />;
+    return this.props.children;
+  }
+}
 
 const STATUS_CONFIG: Record<string, { label: string; icon: string; color: string }> = {
   pending: { label: 'Pending', icon: 'schedule', color: Colors.warning },
+  confirmed: { label: 'Confirmed', icon: 'check-circle', color: Colors.info },
   shipped: { label: 'Shipped', icon: 'local-shipping', color: Colors.info },
   delivered: { label: 'Delivered', icon: 'check-circle', color: Colors.success },
+  cancelled: { label: 'Cancelled', icon: 'cancel', color: Colors.error },
 };
 
 function AnimatedBar({ height, maxHeight, delay }: { height: number; maxHeight: number; delay: number }) {
@@ -63,26 +82,221 @@ function AnimatedBar({ height, maxHeight, delay }: { height: number; maxHeight: 
   );
 }
 
-export default function VendorDashboardScreen() {
+function DashboardBody() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { unreadCount } = useNotifications();
-  const [storeActive, setStoreActive] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+
+  const stats = useQuery(api.orders.myStoreStats);
+  const storeOrders = useQuery(api.orders.forMyStore);
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
     setTimeout(() => setRefreshing(false), 1500);
   }, []);
 
-  const maxSale = Math.max(...SALES_DATA.map((d) => d.value));
+  if (stats === undefined || storeOrders === undefined) {
+    return (
+      <View style={styles.centerWrap}>
+        <ActivityIndicator size="large" color={Colors.primary} />
+        <Text style={styles.emptySub}>Loading your store…</Text>
+      </View>
+    );
+  }
+
+  const recentOrders = storeOrders.slice(0, 5);
+  const lowStock = stats.lowStock;
+  const months = stats.salesByMonth;
+  const maxSale = Math.max(...months.map((d) => d.total), 1);
 
   const analytics = [
-    { label: 'Total Sales', value: formatPrice(2450000), icon: 'trending-up', color: Colors.success },
-    { label: 'Orders', value: '156', icon: 'receipt-long', color: Colors.primary },
-    { label: 'Profile Views', value: '1,892', icon: 'visibility', color: Colors.tertiary },
-    { label: 'Rating', value: '4.8', icon: 'star', color: Colors.secondary },
+    { label: 'Total Sales', value: formatPrice(stats.totalSales), icon: 'trending-up', color: Colors.success },
+    { label: 'Orders', value: String(stats.orderCount), icon: 'receipt-long', color: Colors.primary },
+    { label: 'Open Orders', value: String(stats.openOrders), icon: 'hourglass-top', color: Colors.tertiary },
+    { label: 'Live Products', value: String(stats.productCount), icon: 'inventory-2', color: Colors.secondary },
   ];
+
+  return (
+    <ScrollView
+      style={styles.scrollView}
+      contentContainerStyle={[styles.scrollContent, { paddingBottom: 32 + insets.bottom }]}
+      showsVerticalScrollIndicator={false}
+      refreshControl={
+        <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.primary} colors={[Colors.primary, Colors.secondary]} progressBackgroundColor="#fff" />
+      }
+    >
+      {/* ─── Stock Alerts (real low-stock products) ─── */}
+      {lowStock.length > 0 && (
+        <View style={styles.alertCard}>
+          <View style={styles.alertHeader}>
+            <MaterialIcons name="warning" size={18} color={Colors.error} />
+            <Text style={styles.alertTitle}>Low Stock Alerts</Text>
+            <View style={styles.alertCount}>
+              <Text style={styles.alertCountText}>{lowStock.length}</Text>
+            </View>
+          </View>
+          {lowStock.slice(0, 5).map((alert) => (
+            <View key={alert._id} style={styles.alertItem}>
+              <View style={styles.alertItemLeft}>
+                <Text style={styles.alertItemName}>{alert.name}</Text>
+                <Text style={styles.alertItemQty}>
+                  {alert.stock === 0 ? 'Out of stock' : `${alert.stock} ${alert.unit} left (min: ${alert.minStock})`}
+                </Text>
+              </View>
+              <TouchableOpacity style={styles.alertAction} onPress={() => router.push('/my-inventory' as any)}>
+                <Text style={styles.alertActionText}>Restock</Text>
+              </TouchableOpacity>
+            </View>
+          ))}
+        </View>
+      )}
+
+      {/* ─── Analytics Grid ─── */}
+      <View style={styles.analyticsGrid}>
+        {analytics.map((item, i) => (
+          <View key={i} style={styles.analyticCard}>
+            <View style={[styles.analyticIcon, { backgroundColor: item.color + '15' }]}>
+              <MaterialIcons name={item.icon as any} size={20} color={item.color} />
+            </View>
+            <Text style={styles.analyticValue}>{item.value}</Text>
+            <Text style={styles.analyticLabel}>{item.label}</Text>
+          </View>
+        ))}
+      </View>
+
+      {/* ─── Sales Trend (real monthly sales) ─── */}
+      <View style={styles.chartCard}>
+        <View style={styles.chartHeader}>
+          <Text style={styles.chartTitle}>Sales Trend</Text>
+          <Text style={styles.chartPeriod}>Last {months.length || 0} months</Text>
+        </View>
+        {months.length === 0 ? (
+          <Text style={styles.emptySub}>No sales yet. Your monthly sales will appear here.</Text>
+        ) : (
+          <>
+            <View style={styles.chartContainer}>
+              <View style={styles.barsRow}>
+                {months.map((d, i) => (
+                  <View key={d.month} style={styles.barCol}>
+                    <AnimatedBar height={d.total} maxHeight={maxSale} delay={i * 80} />
+                  </View>
+                ))}
+              </View>
+              <View style={styles.barLabels}>
+                {months.map((d) => (
+                  <Text key={d.month} style={styles.barLabel}>{d.month.slice(5)}</Text>
+                ))}
+              </View>
+            </View>
+            <View style={styles.chartTotal}>
+              <Text style={styles.chartTotalLabel}>Total</Text>
+              <Text style={styles.chartTotalValue}>{formatPrice(stats.totalSales)}</Text>
+            </View>
+          </>
+        )}
+      </View>
+
+      {/* ─── Recent Orders ─── */}
+      <View style={styles.ordersSection}>
+        <View style={styles.ordersHeader}>
+          <Text style={styles.ordersTitle}>Recent Orders</Text>
+          <TouchableOpacity onPress={() => router.push('/orders' as any)}>
+            <Text style={styles.ordersViewAll}>View All</Text>
+          </TouchableOpacity>
+        </View>
+        {recentOrders.length === 0 ? (
+          <View style={styles.chartCard}>
+            <Text style={styles.emptySub}>No orders yet. New orders from customers will appear here.</Text>
+          </View>
+        ) : (
+          recentOrders.map((order) => {
+            const status = STATUS_CONFIG[order.status] || STATUS_CONFIG.pending;
+            const firstItem = order.items[0];
+            return (
+              <View key={order._id} style={styles.orderCard}>
+                <View style={styles.orderTop}>
+                  <Text style={styles.orderId}>{order.number}</Text>
+                  <View style={[styles.orderStatus, { backgroundColor: status.color + '15' }]}>
+                    <MaterialIcons name={status.icon as any} size={12} color={status.color} />
+                    <Text style={[styles.orderStatusText, { color: status.color }]}>{status.label}</Text>
+                  </View>
+                </View>
+                <Text style={styles.orderCustomer}>{order.buyerName}</Text>
+                <Text style={styles.orderItem}>
+                  {firstItem ? `${firstItem.name} x ${firstItem.quantity}` : `${order.items.length} items`}
+                </Text>
+                <View style={styles.orderBottom}>
+                  <Text style={styles.orderTotal}>{formatPrice(order.total)}</Text>
+                  <Text style={styles.orderDate}>{new Date(order._creationTime).toLocaleDateString()}</Text>
+                </View>
+              </View>
+            );
+          })
+        )}
+      </View>
+
+      {/* ─── Quick Actions ─── */}
+      <Text style={styles.sectionTitle}>Quick Actions</Text>
+      <View style={styles.quickActions}>
+        <TouchableOpacity style={styles.quickAction} onPress={() => router.push('/add-listing' as any)}>
+          <MaterialIcons name="add-circle" size={22} color={Colors.primary} />
+          <Text style={styles.quickActionText}>Add Listing</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.quickAction} onPress={() => router.push('/my-inventory' as any)}>
+          <MaterialIcons name="inventory" size={22} color={Colors.primary} />
+          <Text style={styles.quickActionText}>Inventory</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.quickAction} onPress={() => router.push('/settings?role=vendor' as any)}>
+          <MaterialIcons name="settings" size={22} color={Colors.primary} />
+          <Text style={styles.quickActionText}>Settings</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.quickAction} onPress={() => router.push('/sales-analytics' as any)}>
+          <MaterialIcons name="bar-chart" size={22} color={Colors.primary} />
+          <Text style={styles.quickActionText}>Analytics</Text>
+        </TouchableOpacity>
+      </View>
+
+    </ScrollView>
+  );
+}
+
+export default function VendorDashboardScreen() {
+  const router = useRouter();
+  const insets = useSafeAreaInsets();
+  const { unreadCount } = useNotifications();
+  const me = useQuery(api.users.me);
+  const setOpen = useMutation(api.stores.update);
+  const [toggleError, setToggleError] = useState<string | null>(null);
+
+  if (me === undefined) {
+    return (
+      <View style={styles.container}>
+        <Stack.Screen options={{ headerShown: false }} />
+        <View style={styles.centerWrap}>
+          <ActivityIndicator size="large" color={Colors.primary} />
+        </View>
+      </View>
+    );
+  }
+  if (!me?.store) {
+    return (
+      <View style={styles.container}>
+        <Stack.Screen options={{ headerShown: false }} />
+        <NoStoreState />
+      </View>
+    );
+  }
+
+  const storeOpen = me.store.isOpen;
+
+  const toggleStore = async () => {
+    setToggleError(null);
+    try {
+      await setOpen({ isOpen: !storeOpen });
+    } catch {
+      setToggleError('Could not update your store. Please try again.');
+    }
+  };
 
   return (
     <View style={styles.container}>
@@ -96,7 +310,7 @@ export default function VendorDashboardScreen() {
         end={{ x: 1, y: 1 }}
       >
         <View style={styles.headerRow}>
-          <TouchableOpacity style={styles.backBtn} onPress={() => router.back()} activeOpacity={0.7}>
+          <TouchableOpacity style={styles.backBtn} onPress={() => goBackOrHome()} activeOpacity={0.7}>
             <MaterialIcons name="arrow-back" size={22} color="#fff" />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Vendor Dashboard</Text>
@@ -106,9 +320,9 @@ export default function VendorDashboardScreen() {
               <View style={styles.notifBadge}><Text style={styles.notifBadgeText}>{unreadCount > 9 ? '9+' : unreadCount}</Text></View>
             )}
           </TouchableOpacity>
-          <View style={[styles.headerStatus, { backgroundColor: storeActive ? 'rgba(76,223,139,0.2)' : 'rgba(255,255,255,0.15)' }]}>
-            <View style={[styles.headerStatusDot, { backgroundColor: storeActive ? '#4cdf8b' : Colors.textLight }]} />
-            <Text style={styles.headerStatusText}>{storeActive ? 'Open' : 'Closed'}</Text>
+          <View style={[styles.headerStatus, { backgroundColor: storeOpen ? 'rgba(76,223,139,0.2)' : 'rgba(255,255,255,0.15)' }]}>
+            <View style={[styles.headerStatusDot, { backgroundColor: storeOpen ? '#4cdf8b' : Colors.textLight }]} />
+            <Text style={styles.headerStatusText}>{storeOpen ? 'Open' : 'Closed'}</Text>
           </View>
         </View>
 
@@ -117,142 +331,23 @@ export default function VendorDashboardScreen() {
             <MaterialIcons name="store" size={24} color="#fff" />
           </View>
           <View style={styles.headerStoreInfo}>
-            <Text style={styles.headerStoreName}>BuildLinka Supplies</Text>
-            <Text style={styles.headerStoreSub}>Premium Construction Materials</Text>
+            <Text style={styles.headerStoreName}>{me.store.name}</Text>
+            <Text style={styles.headerStoreSub} numberOfLines={1}>{me.store.location}</Text>
           </View>
           <TouchableOpacity
-            style={[styles.headerToggle, storeActive && styles.headerToggleActive]}
-            onPress={() => setStoreActive(!storeActive)}
+            style={[styles.headerToggle, storeOpen && styles.headerToggleActive]}
+            onPress={toggleStore}
+            accessibilityLabel="Toggle store open"
           >
-            <View style={[styles.headerToggleKnob, storeActive && styles.headerToggleKnobActive]} />
+            <View style={[styles.headerToggleKnob, storeOpen && styles.headerToggleKnobActive]} />
           </TouchableOpacity>
         </View>
+        {toggleError && <Text style={styles.headerError}>{toggleError}</Text>}
       </LinearGradient>
 
-      <ScrollView
-        style={styles.scrollView}
-        contentContainerStyle={[styles.scrollContent, { paddingBottom: 32 + insets.bottom }]}
-        showsVerticalScrollIndicator={false}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.primary} colors={[Colors.primary, Colors.secondary]} progressBackgroundColor="#fff" />
-        }
-      >
-        {/* ─── Stock Alerts ─── */}
-        {STOCK_ALERTS.filter((a) => a.qty <= a.minQty).length > 0 && (
-          <View style={styles.alertCard}>
-            <View style={styles.alertHeader}>
-              <MaterialIcons name="warning" size={18} color={Colors.error} />
-              <Text style={styles.alertTitle}>Critical Stock Alerts</Text>
-              <View style={styles.alertCount}>
-                <Text style={styles.alertCountText}>{STOCK_ALERTS.length}</Text>
-              </View>
-            </View>
-            {STOCK_ALERTS.map((alert) => (
-              <View key={alert.id} style={styles.alertItem}>
-                <View style={styles.alertItemLeft}>
-                  <Text style={styles.alertItemName}>{alert.item}</Text>
-                  <Text style={styles.alertItemQty}>
-                    {alert.qty === 0 ? 'Out of stock' : `${alert.qty} left (min: ${alert.minQty})`}
-                  </Text>
-                </View>
-                <TouchableOpacity style={styles.alertAction} onPress={() => router.push('/add-listing' as any)}>
-                  <Text style={styles.alertActionText}>Restock</Text>
-                </TouchableOpacity>
-              </View>
-            ))}
-          </View>
-        )}
-
-        {/* ─── Analytics Grid ─── */}
-        <View style={styles.analyticsGrid}>
-          {analytics.map((item, i) => (
-            <View key={i} style={styles.analyticCard}>
-              <View style={[styles.analyticIcon, { backgroundColor: item.color + '15' }]}>
-                <MaterialIcons name={item.icon as any} size={20} color={item.color} />
-              </View>
-              <Text style={styles.analyticValue}>{item.value}</Text>
-              <Text style={styles.analyticLabel}>{item.label}</Text>
-            </View>
-          ))}
-        </View>
-
-        {/* ─── Sales Trend ─── */}
-        <View style={styles.chartCard}>
-          <View style={styles.chartHeader}>
-            <Text style={styles.chartTitle}>Sales Trend</Text>
-            <Text style={styles.chartPeriod}>Last 6 months</Text>
-          </View>
-          <View style={styles.chartContainer}>
-            <View style={styles.barsRow}>
-              {SALES_DATA.map((d, i) => (
-                <View key={d.month} style={styles.barCol}>
-                  <AnimatedBar height={d.value} maxHeight={maxSale} delay={i * 80} />
-                </View>
-              ))}
-            </View>
-            <View style={styles.barLabels}>
-              {SALES_DATA.map((d) => (
-                <Text key={d.month} style={styles.barLabel}>{d.month}</Text>
-              ))}
-            </View>
-          </View>
-          <View style={styles.chartTotal}>
-            <Text style={styles.chartTotalLabel}>Total (6 months)</Text>
-            <Text style={styles.chartTotalValue}>{formatPrice(SALES_DATA.reduce((s, d) => s + d.value, 0))}</Text>
-          </View>
-        </View>
-
-        {/* ─── Recent Orders ─── */}
-        <View style={styles.ordersSection}>
-          <View style={styles.ordersHeader}>
-            <Text style={styles.ordersTitle}>Recent Orders</Text>
-            <TouchableOpacity onPress={() => router.push('/orders' as any)}>
-              <Text style={styles.ordersViewAll}>View All</Text>
-            </TouchableOpacity>
-          </View>
-          {RECENT_ORDERS.map((order) => {
-            const status = STATUS_CONFIG[order.status] || STATUS_CONFIG.pending;
-            return (
-              <View key={order.id} style={styles.orderCard}>
-                <View style={styles.orderTop}>
-                  <Text style={styles.orderId}>{order.id}</Text>
-                  <View style={[styles.orderStatus, { backgroundColor: status.color + '15' }]}>
-                    <MaterialIcons name={status.icon as any} size={12} color={status.color} />
-                    <Text style={[styles.orderStatusText, { color: status.color }]}>{status.label}</Text>
-                  </View>
-                </View>
-                <Text style={styles.orderCustomer}>{order.customer}</Text>
-                <Text style={styles.orderItem}>{order.item}</Text>
-                <View style={styles.orderBottom}>
-                  <Text style={styles.orderTotal}>{formatPrice(order.total)}</Text>
-                  <Text style={styles.orderDate}>{order.date}</Text>
-                </View>
-              </View>
-            );
-          })}
-        </View>
-
-        {/* ─── Quick Actions ─── */}
-        <Text style={styles.sectionTitle}>Quick Actions</Text>
-        <View style={styles.quickActions}>
-          <TouchableOpacity style={styles.quickAction} onPress={() => router.push('/add-listing' as any)}>
-            <MaterialIcons name="add-circle" size={22} color={Colors.primary} />
-            <Text style={styles.quickActionText}>Add Listing</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.quickAction} onPress={() => router.push('/my-listings' as any)}>
-            <MaterialIcons name="inventory" size={22} color={Colors.primary} />
-            <Text style={styles.quickActionText}>Inventory</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.quickAction} onPress={() => router.push('/settings?role=vendor' as any)}>
-            <MaterialIcons name="settings" size={22} color={Colors.primary} />
-            <Text style={styles.quickActionText}>Settings</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.quickAction} onPress={() => router.push('/sales-analytics' as any)}>
-            <MaterialIcons name="bar-chart" size={22} color={Colors.primary} />
-            <Text style={styles.quickActionText}>Analytics</Text>
-          </TouchableOpacity>
-        </View>
-      </ScrollView>
+      <StoreErrorBoundary>
+        <DashboardBody />
+      </StoreErrorBoundary>
     </View>
   );
 }
@@ -269,6 +364,13 @@ const styles = StyleSheet.create({
     padding: 16,
     gap: 14,
     paddingTop: 12,
+  },
+  centerWrap: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 32,
+    gap: 8,
   },
 
   /* ─── Header ─── */
@@ -398,6 +500,12 @@ const styles = StyleSheet.create({
   },
   headerToggleKnobActive: {
     alignSelf: 'flex-end',
+  },
+  headerError: {
+    fontSize: 12,
+    color: '#ffd7d7',
+    paddingHorizontal: 16,
+    paddingTop: 6,
   },
 
   /* ─── Stock Alerts ─── */
@@ -703,4 +811,12 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: Colors.textDark,
   },
+
+  /* ─── Empty state ─── */
+  emptyIcon: { width: 72, height: 72, borderRadius: 36, backgroundColor: Colors.greenTint + '80', alignItems: 'center', justifyContent: 'center', marginBottom: 8 },
+  emptyTitle: { fontSize: 20, fontWeight: '700', color: Colors.textDark, textAlign: 'center' },
+  emptySub: { fontSize: 14, color: Colors.textLight, textAlign: 'center', lineHeight: 20, marginBottom: 4 },
+  primaryBtn: { flexDirection: 'row', alignItems: 'center', gap: 8, height: 48, paddingHorizontal: 24, borderRadius: 999, backgroundColor: Colors.primary, marginTop: 8 },
+  primaryBtnText: { fontSize: 15, fontWeight: '700', color: Colors.onPrimary },
+  errorText: { fontSize: 13, color: Colors.error, textAlign: 'center' },
 });

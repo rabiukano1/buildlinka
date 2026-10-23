@@ -4,7 +4,8 @@ import { useRouter } from 'expo-router';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors } from '../../constants/Colors';
-import { PRODUCTS, VENDORS } from '../../constants/MockData';
+import { useQuery } from 'convex/react';
+import { api } from '../../convex/_generated/api';
 import { useCart } from '../../contexts/CartContext';
 import { useSaved } from '../../contexts/SavedItemsContext';
 import ProductCard from '../../components/ProductCard';
@@ -17,9 +18,9 @@ const formatPrice = (n: number) => '₦' + Math.round(n).toLocaleString('en-NG')
 
 // Typical figures; coverage is the effective area one sheet/tile covers after side and end laps.
 const SHEET_TYPES = [
-  { id: 'aluminium', label: 'Aluminium long-span', short: 'Aluminium', icon: 'view-stream', coverage: 1.8, fixingsPerM2: 6, productId: 'p3', lifespan: '30–40 yrs', noise: 'Loud in rain', heat: 'Reflects heat', cost: 2 },
-  { id: 'stone', label: 'Stone-coated tile', short: 'Stone-coated', icon: 'texture', coverage: 0.48, fixingsPerM2: 10, productId: null, lifespan: '50+ yrs', noise: 'Quiet', heat: 'Well insulated', cost: 3 },
-  { id: 'pvc', label: 'PVC / polycarbonate', short: 'PVC', icon: 'wb-sunny', coverage: 1.7, fixingsPerM2: 6, productId: null, lifespan: '10–20 yrs', noise: 'Medium', heat: 'Lets light in', cost: 1 },
+  { id: 'aluminium', label: 'Aluminium long-span', short: 'Aluminium', icon: 'view-stream', coverage: 1.8, fixingsPerM2: 6, lifespan: '30–40 yrs', noise: 'Loud in rain', heat: 'Reflects heat', cost: 2 },
+  { id: 'stone', label: 'Stone-coated tile', short: 'Stone-coated', icon: 'texture', coverage: 0.48, fixingsPerM2: 10, lifespan: '50+ yrs', noise: 'Quiet', heat: 'Well insulated', cost: 3 },
+  { id: 'pvc', label: 'PVC / polycarbonate', short: 'PVC', icon: 'wb-sunny', coverage: 1.7, fixingsPerM2: 6, lifespan: '10–20 yrs', noise: 'Medium', heat: 'Lets light in', cost: 1 },
 ] as const;
 
 const STYLES: { id: RoofStyle; label: string; icon: string }[] = [
@@ -46,9 +47,11 @@ export default function RoofingScreen() {
   const [waste, setWaste] = useState(10);
 
   const type = SHEET_TYPES.find((t) => t.id === typeId)!;
-  const product = type.productId ? PRODUCTS.find((p) => p.id === type.productId) : undefined;
-  const roofingProducts = PRODUCTS.filter((p) => p.category === 'Roofing');
-  const vendor = VENDORS.find((v) => v.category === 'Roofing');
+  const roofingProducts = useQuery(api.products.list, { category: 'Roofing' }) ?? [];
+  // Only aluminium long-span is stocked on BuildLinka; other types show a vendor-quote notice.
+  const product = typeId === 'aluminium'
+    ? (roofingProducts.find((p) => p.stock > 0) ?? roofingProducts[0])
+    : undefined;
 
   const estimate = useMemo(
     () => estimateRoof({
@@ -204,29 +207,15 @@ export default function RoofingScreen() {
         <Text style={styles.sectionTitle}>Roofing products</Text>
         {roofingProducts.map((p) => (
           <ProductCard
-            key={p.id}
+            key={p._id}
             product={p}
             horizontal
-            onPress={() => router.push(`/product/${p.id}`)}
+            onPress={() => router.push(`/product/${p._id}`)}
             onAddToCart={() => addItem(p)}
             onToggleSave={() => toggleSave(p)}
-            isSaved={isSaved(p.id)}
+            isSaved={isSaved(p._id)}
           />
         ))}
-
-        {vendor && (
-          <View style={[styles.card, styles.vendor]}>
-            <Text style={styles.vendorEmoji}>{vendor.emoji}</Text>
-            <View style={styles.flex}>
-              <View style={styles.vendorNameRow}>
-                <Text style={styles.vendorName}>{vendor.name}</Text>
-                {vendor.verified && <MaterialIcons name="verified" size={16} color={Colors.primary} />}
-              </View>
-              <Text style={styles.vendorMeta}>★ {vendor.rating} · {vendor.location}</Text>
-              <Text style={styles.vendorDesc}>{vendor.description}</Text>
-            </View>
-          </View>
-        )}
 
         <TouchableOpacity style={styles.installer} onPress={() => router.push('/(tabs)/workers' as any)} activeOpacity={0.85}>
           <View style={styles.installerIcon}>

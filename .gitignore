@@ -39,3 +39,19 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+# ── Backend stays private (not on GitHub) ──
+# Server code lives in convex/; only the generated client stubs are committed,
+# because the app imports them and EAS builds from the git checkout.
+/convex/*
+!/convex/_generated/
+/backend-tests/
+/server/
+/self-hosted/
+BACKEND-GUIDE.md
+
+# Secrets and local config
+.env
+.env.*
+!.env.example
+*.pem

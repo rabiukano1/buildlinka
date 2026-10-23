@@ -20,19 +20,28 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors } from '../constants/Colors';
 import { useNotifications } from '../contexts/NotificationContext';
 import { useFeatured } from '../contexts/FeaturedContext';
-import { VENDORS, WORKERS, type Vendor, type Worker } from '../constants/MockData';
+import { useQuery, useMutation } from 'convex/react';
+import { api } from '../convex/_generated/api';
+import { errorMessage, goBackOrHome, type Role } from '../lib/backend';
 
 const { width } = Dimensions.get('window');
 
-const formatPrice = (price: number) => '₦' + price.toLocaleString('en-NG');
-
-type AdminTab = 'overview' | 'featured' | 'push' | 'system';
+type AdminTab = 'overview' | 'users' | 'featured' | 'push' | 'system';
 
 const TABS: { key: AdminTab; label: string; icon: string }[] = [
   { key: 'overview', label: 'Overview', icon: 'dashboard' },
+  { key: 'users', label: 'Users', icon: 'people' },
   { key: 'featured', label: 'Featured', icon: 'stars' },
   { key: 'push', label: 'Push', icon: 'campaign' },
   { key: 'system', label: 'System', icon: 'shield' },
+];
+
+const MANAGEABLE_ROLES: { role: Role; label: string; icon: string }[] = [
+  { role: 'buyer', label: 'Buyer', icon: 'shopping-bag' },
+  { role: 'vendor', label: 'Vendor', icon: 'store' },
+  { role: 'worker', label: 'Worker', icon: 'build' },
+  { role: 'engineer', label: 'Engineer', icon: 'engineering' },
+  { role: 'admin', label: 'Admin', icon: 'shield' },
 ];
 
 function StatCard({ label, value, icon, color, index }: { label: string; value: string; icon: string; color: string; index: number }) {
@@ -100,14 +109,121 @@ function SysToggle({ label, desc, icon, color, defaultVal }: { label: string; de
 export default function AdminPanelScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { unreadCount, addNotification } = useNotifications();
+  const { unreadCount } = useNotifications();
   const [showPushModal, setShowPushModal] = useState(false);
   const [pushTitle, setPushTitle] = useState('');
   const [pushMessage, setPushMessage] = useState('');
   const [pushAudience, setPushAudience] = useState<'all' | 'vendors' | 'workers' | 'engineers' | 'buyers'>('all');
   const [sending, setSending] = useState(false);
   const [activeTab, setActiveTab] = useState<AdminTab>('overview');
-  const { popularVendorIds, popularWorkerIds, toggleVendorPopular, toggleWorkerPopular } = useFeatured();
+  const { popularVendorIds, toggleVendorPopular, popularWorkerIds, toggleWorkerPopular } = useFeatured();
+  const stores = useQuery(api.stores.list, { limit: 100 });
+  const workers = useQuery(api.workers.list, { limit: 100 });
+  const products = useQuery(api.products.list, {});
+  const me = useQuery(api.users.me);
+  const anyAdmin = useQuery(api.users.adminExists);
+  const isAdmin = me?.roles.includes('admin') ?? false;
+
+  // Non-admins never reach the user directory: the query stays skipped and
+  // the server enforces the same rule on every admin mutation.
+  const [userSearch, setUserSearch] = useState('');
+  const [userQuery, setUserQuery] = useState('');
+  const users = useQuery(api.users.listUsers, isAdmin ? { search: userQuery || undefined, limit: 100 } : 'skip');
+  const grantRole = useMutation(api.users.grantRole);
+  const revokeRole = useMutation(api.users.revokeRole);
+  const bootstrapAdmin = useMutation(api.users.bootstrapAdmin);
+  const broadcast = useMutation(api.notifications.broadcast);
+  const [roleBusy, setRoleBusy] = useState<string | null>(null);
+  const [claiming, setClaiming] = useState(false);
+
+  const toggleUserRole = async (userId: string, role: Role, has: boolean) => {
+    const action = has ? revokeRole : grantRole;
+    const verb = has ? 'Remove' : 'Grant';
+    if (role === 'admin' && !has) {
+      Alert.alert('Grant admin?', 'Admins can change any account type. Only trust this to owners.', [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Grant admin',
+          style: 'destructive',
+          onPress: () => runToggle(),
+        },
+      ]);
+    } else {
+      runToggle();
+    }
+    async function runToggle() {
+      setRoleBusy(userId + role);
+      try {
+        await action({ userId: userId as never, role });
+      } catch (err) {
+        Alert.alert(`${verb} failed`, errorMessage(err));
+      } finally {
+        setRoleBusy(null);
+      }
+    }
+  };
+
+  const claimAdmin = async () => {
+    setClaiming(true);
+    try {
+      await bootstrapAdmin({});
+      Alert.alert('Admin enabled', 'This account can now manage user types.');
+    } catch (err) {
+      Alert.alert('Could not claim admin', errorMessage(err));
+    } finally {
+      setClaiming(false);
+    }
+  };
+
+  const storeCount = stores?.length ?? 0;
+  const productCount = products?.length ?? 0;
+  const popularCount = popularVendorIds.length;
+
+  // Real authorization lives on the server (requireAdminId); this gate only
+  // decides what the panel shows. The first-ever admin claims via bootstrap.
+  if (me && !isAdmin) {
+    return (
+      <View style={styles.container}>
+        <Stack.Screen options={{ headerShown: false }} />
+        <StatusBar barStyle="light-content" />
+        <LinearGradient
+          colors={['#1a1a2e', '#16213e', '#0f3460']}
+          style={[styles.headerWrap, { paddingTop: insets.top }]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1.2, y: 1.2 }}
+        >
+          <View style={styles.headerRow}>
+            <TouchableOpacity style={styles.backBtn} onPress={() => goBackOrHome()} activeOpacity={0.7}>
+              <MaterialIcons name="arrow-back" size={20} color="#fff" />
+            </TouchableOpacity>
+            <View style={styles.headerTitleArea}>
+              <Text style={styles.headerTitle}>Admin Panel</Text>
+              <Text style={styles.headerSub}>Restricted area</Text>
+            </View>
+          </View>
+        </LinearGradient>
+        <View style={styles.deniedBox}>
+          <MaterialIcons name="lock" size={40} color={Colors.textLight} />
+          <Text style={styles.deniedTitle}>Not authorized</Text>
+          <Text style={styles.deniedSub}>
+            {anyAdmin === false
+              ? 'No admin exists yet. Claim the first admin seat to manage account types.'
+              : 'This account is not an admin. Ask an admin to promote it from the Users tab.'}
+          </Text>
+          {anyAdmin === false && (
+            <TouchableOpacity
+              style={[styles.claimBtn, claiming && styles.claimBtnOff]}
+              onPress={claimAdmin}
+              disabled={claiming}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.claimText}>{claiming ? 'Claiming…' : 'Claim admin access'}</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>
@@ -121,7 +237,7 @@ export default function AdminPanelScreen() {
         end={{ x: 1.2, y: 1.2 }}
       >
         <View style={styles.headerRow}>
-          <TouchableOpacity style={styles.backBtn} onPress={() => router.back()} activeOpacity={0.7}>
+          <TouchableOpacity style={styles.backBtn} onPress={() => goBackOrHome()} activeOpacity={0.7}>
             <MaterialIcons name="arrow-back" size={20} color="#fff" />
           </TouchableOpacity>
           <View style={styles.headerTitleArea}>
@@ -141,10 +257,10 @@ export default function AdminPanelScreen() {
         </View>
 
         <View style={styles.statsRow}>
-          <StatCard label="Total Users" value="1,284" icon="people" color="#60a5fa" index={0} />
-          <StatCard label="Products" value="892" icon="inventory-2" color="#a78bfa" index={1} />
-          <StatCard label="Orders" value="357" icon="receipt-long" color="#22d3ee" index={2} />
-          <StatCard label="Revenue" value="₦4.2M" icon="trending-up" color="#34d399" index={3} />
+          <StatCard label="Stores" value={stores === undefined ? '…' : String(storeCount)} icon="store" color="#60a5fa" index={0} />
+          <StatCard label="Products" value={products === undefined ? '…' : String(productCount)} icon="inventory-2" color="#a78bfa" index={1} />
+          <StatCard label="Verified" value={stores === undefined ? '…' : String(stores.filter((s) => s.verified).length)} icon="verified" color="#22d3ee" index={2} />
+          <StatCard label="Popular" value={String(popularCount)} icon="stars" color="#34d399" index={3} />
         </View>
 
       </LinearGradient>
@@ -176,48 +292,26 @@ export default function AdminPanelScreen() {
             <View style={styles.overviewGrid}>
               <View style={styles.ovCard}>
                 <View style={[styles.ovIcon, { backgroundColor: '#2563eb15' }]}>
-                  <MaterialIcons name="people" size={22} color="#2563eb" />
+                  <MaterialIcons name="store" size={22} color="#2563eb" />
                 </View>
-                <Text style={styles.ovValue}>1,284</Text>
-                <Text style={styles.ovLabel}>Total Users</Text>
+                <Text style={styles.ovValue}>{stores === undefined ? '…' : storeCount}</Text>
+                <Text style={styles.ovLabel}>Vendor Stores</Text>
                 <View style={styles.ovSubRow}>
-                  <Text style={styles.ovSub}>256 Workers</Text>
-                  <Text style={styles.ovDot}>·</Text>
-                  <Text style={styles.ovSub}>184 Vendors</Text>
+                  <Text style={styles.ovSub}>
+                    {stores === undefined ? 'Loading…' : `${stores.filter((s) => s.verified).length} verified`}
+                  </Text>
                 </View>
               </View>
               <View style={styles.ovCard}>
                 <View style={[styles.ovIcon, { backgroundColor: '#7c3aed15' }]}>
                   <MaterialIcons name="inventory-2" size={22} color="#7c3aed" />
                 </View>
-                <Text style={styles.ovValue}>892</Text>
-                <Text style={styles.ovLabel}>Products</Text>
+                <Text style={styles.ovValue}>{products === undefined ? '…' : productCount}</Text>
+                <Text style={styles.ovLabel}>Live Products</Text>
                 <View style={styles.ovSubRow}>
-                  <Text style={styles.ovSub}>24 pending</Text>
-                  <Text style={styles.ovDot}>·</Text>
-                  <Text style={styles.ovSub}>8 flagged</Text>
-                </View>
-              </View>
-              <View style={styles.ovCard}>
-                <View style={[styles.ovIcon, { backgroundColor: '#0891b215' }]}>
-                  <MaterialIcons name="receipt-long" size={22} color="#0891b2" />
-                </View>
-                <Text style={styles.ovValue}>357</Text>
-                <Text style={styles.ovLabel}>Orders</Text>
-                <View style={styles.ovSubRow}>
-                  <Text style={styles.ovSub}>45 pending</Text>
-                  <Text style={styles.ovDot}>·</Text>
-                  <Text style={styles.ovSub}>3 disputes</Text>
-                </View>
-              </View>
-              <View style={styles.ovCard}>
-                <View style={[styles.ovIcon, { backgroundColor: '#05966915' }]}>
-                  <MaterialIcons name="trending-up" size={22} color="#059669" />
-                </View>
-                <Text style={styles.ovValue}>₦4.2M</Text>
-                <Text style={styles.ovLabel}>Revenue</Text>
-                <View style={styles.ovSubRow}>
-                  <Text style={styles.ovSub}>+12% this month</Text>
+                  <Text style={styles.ovSub}>
+                    {products === undefined ? 'Loading…' : `${new Set(products.map((p) => p.storeId)).size} stores selling`}
+                  </Text>
                 </View>
               </View>
             </View>
@@ -244,20 +338,22 @@ export default function AdminPanelScreen() {
 
             <Text style={styles.mgmtLabel}>Recent Activity</Text>
             <View style={styles.activityCard}>
-              {[
-                { icon: 'person-add', color: '#2563eb', text: '3 new workers registered', time: '12m ago' },
-                { icon: 'shopping-cart', color: '#7c3aed', text: '15 new orders placed', time: '34m ago' },
-                { icon: 'flag', color: '#dc2626', text: '2 items flagged for review', time: '1h ago' },
-                { icon: 'check-circle', color: '#059669', text: '8 products approved', time: '2h ago' },
-              ].map((a, i) => (
-                <View key={i} style={[styles.activityRow, i < 3 && styles.activityRowBorder]}>
-                  <View style={[styles.activityIcon, { backgroundColor: a.color + '10' }]}>
-                    <MaterialIcons name={a.icon as any} size={16} color={a.color} />
-                  </View>
-                  <Text style={styles.activityText}>{a.text}</Text>
-                  <Text style={styles.activityTime}>{a.time}</Text>
+              <View style={styles.activityRow}>
+                <View style={[styles.activityIcon, { backgroundColor: '#2563eb10' }]}>
+                  <MaterialIcons name="store" size={16} color="#2563eb" />
                 </View>
-              ))}
+                <Text style={styles.activityText}>
+                  {stores === undefined ? 'Loading stores…' : `${storeCount} vendor stores on the platform`}
+                </Text>
+              </View>
+              <View style={[styles.activityRow, styles.activityRowBorder]}>
+                <View style={[styles.activityIcon, { backgroundColor: '#7c3aed10' }]}>
+                  <MaterialIcons name="inventory-2" size={16} color="#7c3aed" />
+                </View>
+                <Text style={styles.activityText}>
+                  {products === undefined ? 'Loading products…' : `${productCount} live products in the catalogue`}
+                </Text>
+              </View>
             </View>
 
             <View style={styles.footer}>
@@ -267,41 +363,154 @@ export default function AdminPanelScreen() {
           </>
         )}
 
+        {/* ─── USERS — promote / demote account types ─── */}
+        {activeTab === 'users' && (
+          <>
+            <Text style={styles.mgmtLabel}>Account types</Text>
+            <Text style={styles.usersHint}>
+              Tap a type to grant it, tap again to remove it. Everyone signs in with the same phone + password — the type only decides which dashboard they use, and any account can hold several types at once.
+            </Text>
+            <View style={styles.searchBar}>
+              <MaterialIcons name="search" size={18} color={Colors.textMuted} />
+              <TextInput
+                style={styles.searchInput}
+                placeholder="Search name, phone, email…"
+                placeholderTextColor={Colors.textMuted}
+                value={userSearch}
+                onChangeText={setUserSearch}
+                returnKeyType="search"
+                onSubmitEditing={() => setUserQuery(userSearch)}
+              />
+              {userSearch.length > 0 && (
+                <TouchableOpacity
+                  onPress={() => {
+                    setUserSearch('');
+                    setUserQuery('');
+                  }}
+                  hitSlop={8}
+                >
+                  <MaterialIcons name="close" size={18} color={Colors.textMuted} />
+                </TouchableOpacity>
+              )}
+            </View>
+
+            {users === undefined ? (
+              <View style={styles.featuredCard}>
+                <View style={styles.featuredRow}>
+                  <Text style={styles.featuredCat}>Loading users…</Text>
+                </View>
+              </View>
+            ) : users.length === 0 ? (
+              <View style={styles.featuredCard}>
+                <View style={styles.featuredRow}>
+                  <Text style={styles.featuredCat}>No users found.</Text>
+                </View>
+              </View>
+            ) : (
+              users.map((u) => (
+                <View key={u._id} style={styles.userCard}>
+                  <View style={styles.userTop}>
+                    <View style={styles.userAvatar}>
+                      <Text style={styles.userInitials}>
+                        {(u.name || '?').split(' ').map((p) => p[0]).join('').slice(0, 2).toUpperCase()}
+                      </Text>
+                    </View>
+                    <View style={styles.userInfo}>
+                      <Text style={styles.userName} numberOfLines={1}>{u.name || 'Unnamed account'}</Text>
+                      <Text style={styles.userPhone} numberOfLines={1}>
+                        {u.phone}
+                        {u.storeName ? ` · ${u.storeName}` : ''}
+                      </Text>
+                      <Text style={styles.userActive}>
+                        Active: {u.activeRole ? u.activeRole[0].toUpperCase() + u.activeRole.slice(1) : '—'}
+                      </Text>
+                    </View>
+                  </View>
+                  <View style={styles.roleRow}>
+                    {MANAGEABLE_ROLES.map((r) => {
+                      const has = u.roles.includes(r.role);
+                      const busy = roleBusy === u._id + r.role;
+                      return (
+                        <TouchableOpacity
+                          key={r.role}
+                          style={[styles.typeChip, has && styles.typeChipOn]}
+                          onPress={() => toggleUserRole(u._id, r.role, has)}
+                          disabled={busy}
+                          activeOpacity={0.7}
+                        >
+                          <MaterialIcons
+                            name={r.icon as never}
+                            size={13}
+                            color={has ? '#fff' : Colors.textMuted}
+                          />
+                          <Text style={[styles.typeChipText, has && styles.typeChipTextOn]}>
+                            {busy ? '…' : r.label}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                </View>
+              ))
+            )}
+          </>
+        )}
+
         {/* ─── FEATURED CONTENT ─── */}
         {activeTab === 'featured' && (
           <>
-            <Text style={styles.mgmtLabel}>Vendors ({VENDORS.filter(v => popularVendorIds.includes(v.id)).length} popular)</Text>
+            <Text style={styles.mgmtLabel}>Vendors ({stores?.filter((v) => popularVendorIds.includes(v._id)).length ?? 0} popular)</Text>
             <View style={styles.featuredCard}>
-              {VENDORS.map((v, i) => (
-                <View key={v.id}>
-                  <FeaturedRow
-                    id={v.id}
-                    name={v.name}
-                    emoji={v.emoji}
-                    category={v.category}
-                    isPopular={popularVendorIds.includes(v.id)}
-                    onToggle={() => toggleVendorPopular(v.id)}
-                  />
-                  {i < VENDORS.length - 1 && <View style={styles.featuredDivider} />}
+              {stores === undefined ? (
+                <View style={styles.featuredRow}>
+                  <Text style={styles.featuredCat}>Loading stores…</Text>
                 </View>
-              ))}
+              ) : stores.length === 0 ? (
+                <View style={styles.featuredRow}>
+                  <Text style={styles.featuredCat}>No vendor stores yet.</Text>
+                </View>
+              ) : (
+                stores.map((v, i) => (
+                  <View key={v._id}>
+                    <FeaturedRow
+                      id={v._id}
+                      name={v.name}
+                      emoji="🏪"
+                      category={v.categories[0] ?? v.location}
+                      isPopular={popularVendorIds.includes(v._id)}
+                      onToggle={() => toggleVendorPopular(v._id)}
+                    />
+                    {i < stores.length - 1 && <View style={styles.featuredDivider} />}
+                  </View>
+                ))
+              )}
             </View>
 
-            <Text style={styles.mgmtLabel}>Workers ({WORKERS.filter(w => popularWorkerIds.includes(w.id)).length} popular)</Text>
+            <Text style={styles.mgmtLabel}>Workers ({workers?.filter((w) => popularWorkerIds.includes(w._id)).length ?? 0} popular)</Text>
             <View style={styles.featuredCard}>
-              {WORKERS.map((w, i) => (
-                <View key={w.id}>
-                  <FeaturedRow
-                    id={w.id}
-                    name={w.name}
-                    emoji={w.avatar}
-                    category={w.trade}
-                    isPopular={popularWorkerIds.includes(w.id)}
-                    onToggle={() => toggleWorkerPopular(w.id)}
-                  />
-                  {i < WORKERS.length - 1 && <View style={styles.featuredDivider} />}
+              {workers === undefined ? (
+                <View style={styles.featuredRow}>
+                  <Text style={styles.featuredCat}>Loading workers…</Text>
                 </View>
-              ))}
+              ) : workers.length === 0 ? (
+                <View style={styles.featuredRow}>
+                  <Text style={styles.featuredCat}>No worker profiles yet.</Text>
+                </View>
+              ) : (
+                workers.map((w, i) => (
+                  <View key={w._id}>
+                    <FeaturedRow
+                      id={w._id}
+                      name={w.name}
+                      emoji="👷"
+                      category={`${w.trade} · ${w.location}`}
+                      isPopular={popularWorkerIds.includes(w._id)}
+                      onToggle={() => toggleWorkerPopular(w._id)}
+                    />
+                    {i < workers.length - 1 && <View style={styles.featuredDivider} />}
+                  </View>
+                ))
+              )}
             </View>
           </>
         )}
@@ -361,25 +570,28 @@ export default function AdminPanelScreen() {
 
               <TouchableOpacity
                 style={[styles.pushSendBtn, (!pushTitle.trim() || !pushMessage.trim() || sending) && styles.pushSendBtnDisabled]}
-                onPress={() => {
+                onPress={async () => {
                   if (!pushTitle.trim() || !pushMessage.trim()) return;
+                  const audienceLabel = pushAudience === 'all' ? 'all users' : pushAudience;
                   setSending(true);
-                  const audienceLabel = pushAudience === 'all' ? 'All Users' : pushAudience.charAt(0).toUpperCase() + pushAudience.slice(1);
-                  addNotification({
-                    type: 'system',
-                    title: pushTitle.trim(),
-                    message: pushMessage.trim() + `\n\n— Admin (sent to ${audienceLabel})`,
-                    timestamp: 'Just now',
-                    icon: 'campaign',
-                    actionRoute: '/admin-panel',
-                  });
-                  setTimeout(() => {
-                    setSending(false);
+                  try {
+                    const sent = await broadcast({
+                      title: pushTitle.trim(),
+                      message: pushMessage.trim(),
+                      audience: pushAudience,
+                      type: 'system',
+                      icon: 'campaign',
+                      actionRoute: '/notifications',
+                    });
                     setPushTitle('');
                     setPushMessage('');
                     setPushAudience('all');
-                    Alert.alert('Notification Sent', `Push notification sent to ${audienceLabel}.`);
-                  }, 600);
+                    Alert.alert('Notification sent', `Delivered to ${sent.sent} ${audienceLabel}.`);
+                  } catch (err) {
+                    Alert.alert('Could not send notification', errorMessage(err));
+                  } finally {
+                    setSending(false);
+                  }
                 }}
                 disabled={!pushTitle.trim() || !pushMessage.trim() || sending}
                 activeOpacity={0.7}
@@ -755,6 +967,52 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.error + '08',
   },
   logoutText: { fontSize: 13, fontWeight: '700', color: Colors.error },
+
+  /* ─── Access gate ─── */
+  deniedBox: { alignItems: 'center', paddingHorizontal: 32, paddingTop: 72, gap: 10 },
+  deniedTitle: { fontSize: 20, fontWeight: '800', color: Colors.textDark },
+  deniedSub: { fontSize: 14, color: Colors.textMuted, textAlign: 'center', lineHeight: 20 },
+  claimBtn: {
+    marginTop: 12, backgroundColor: Colors.primary, borderRadius: 99,
+    paddingHorizontal: 28, paddingVertical: 14,
+  },
+  claimBtnOff: { opacity: 0.6 },
+  claimText: { fontSize: 15, fontWeight: '700', color: '#fff' },
+
+  /* ─── Users ─── */
+  usersHint: { fontSize: 13, color: Colors.textMuted, lineHeight: 18, marginBottom: 10 },
+  searchBar: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    backgroundColor: '#fff', borderRadius: 12, paddingHorizontal: 12,
+    height: 46, marginBottom: 4,
+    borderWidth: 1, borderColor: Colors.outlineVariant,
+  },
+  searchInput: { flex: 1, fontSize: 14, color: Colors.textDark, paddingVertical: 0 },
+  userCard: {
+    backgroundColor: '#fff', borderRadius: 14, padding: 14, gap: 10,
+    borderWidth: 1, borderColor: Colors.outlineVariant,
+  },
+  userTop: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  userAvatar: {
+    width: 44, height: 44, borderRadius: 22,
+    backgroundColor: Colors.primary + '12',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  userInitials: { fontSize: 15, fontWeight: '800', color: Colors.primary },
+  userInfo: { flex: 1, gap: 1 },
+  userName: { fontSize: 15, fontWeight: '700', color: Colors.textDark },
+  userPhone: { fontSize: 12.5, color: Colors.textMuted },
+  userActive: { fontSize: 12, fontWeight: '600', color: Colors.primary },
+  roleRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  typeChip: {
+    flexDirection: 'row', alignItems: 'center', gap: 4,
+    paddingHorizontal: 10, paddingVertical: 7, borderRadius: 99,
+    borderWidth: 1.5, borderColor: Colors.outlineVariant,
+    backgroundColor: Colors.background,
+  },
+  typeChipOn: { borderColor: Colors.primary, backgroundColor: Colors.primary },
+  typeChipText: { fontSize: 12, fontWeight: '700', color: Colors.textMuted },
+  typeChipTextOn: { color: '#fff' },
 
   /* ─── Footer ─── */
   footer: { alignItems: 'center', paddingVertical: 20, gap: 2 },

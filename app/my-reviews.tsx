@@ -1,267 +1,251 @@
-import { useState, useMemo } from 'react';
-import { View, Text, FlatList, ScrollView, StyleSheet, TouchableOpacity } from 'react-native';
+import { useState } from 'react';
+import {
+  View, Text, ScrollView, StyleSheet, TouchableOpacity, TextInput, ActivityIndicator, Alert, Image, Modal,
+} from 'react-native';
 import { Stack, useRouter } from 'expo-router';
 import { MaterialIcons } from '@expo/vector-icons';
+import { useMutation, useQuery } from 'convex/react';
+import { api } from '../convex/_generated/api';
+import type { Id } from '../convex/_generated/dataModel';
 import { Colors } from '../constants/Colors';
+import { errorMessage } from '../lib/backend';
 
-type Review = {
-  id: string;
-  product: string;
-  emoji: string;
-  rating: number;
-  text: string;
-  date: string;
-  vendor: string;
+type Reviewable = {
+  targetType: 'product' | 'store' | 'worker';
+  targetId: string;
+  targetName: string;
+  targetRoute: string;
+  imageUrl: string | null;
+  orderId: string | null;
+  jobId: string | null;
+  date: number;
 };
-
-const MY_REVIEWS: Review[] = [
-  { id: 'r1', product: 'Dangote Cement 42.5R (50kg)', emoji: '🏗️', rating: 5, text: 'Top quality cement, set perfectly. Will buy again.', date: '12 May 2026', vendor: 'Lagos Building Supplies' },
-  { id: 'r2', product: 'Iron Rod 12mm (6m)', emoji: '⚙️', rating: 4, text: 'Good quality rods, straight and true to size.', date: '28 Apr 2026', vendor: 'Steel Masters Ltd' },
-  { id: 'r3', product: 'Ceramic Floor Tiles 60×60cm', emoji: '🏛️', rating: 5, text: 'Beautiful tiles, great finish. Highly recommended!', date: '15 Apr 2026', vendor: 'TileWorld Nigeria' },
-  { id: 'r4', product: 'Aluminum Roofing Sheet 0.5mm', emoji: '🏠', rating: 3, text: 'Decent quality but took longer to deliver.', date: '2 Apr 2026', vendor: 'RoofPro Nigeria' },
-  { id: 'r5', product: 'PVC Water Pipe 3/4 inch (9m)', emoji: '🔧', rating: 4, text: 'Good pipes, sturdy and well priced.', date: '20 Mar 2026', vendor: 'PlumbShop PH' },
-];
-
-const FILTERS = [
-  { key: 'all', label: 'All', icon: 'rate-review' },
-  { key: '5', label: '5 ★', icon: 'star' },
-  { key: '4', label: '4 ★', icon: 'star-half' },
-  { key: '3', label: '3 ★', icon: 'star-border' },
-] as const;
-
-function StarRow({ rating, size = 14 }: { rating: number; size?: number }) {
-  return (
-    <View style={{ flexDirection: 'row', gap: 2 }}>
-      {[1, 2, 3, 4, 5].map((s) => (
-        <MaterialIcons key={s} name={s <= rating ? 'star' : 'star-border'} size={size} color={s <= rating ? Colors.amber : Colors.outlineVariant} />
-      ))}
-    </View>
-  );
-}
 
 export default function MyReviewsScreen() {
   const router = useRouter();
-  const [activeFilter, setActiveFilter] = useState<string>('all');
+  const me = useQuery(api.users.me);
+  const reviews = useQuery(api.reviews.mine, me ? {} : 'skip');
+  const pending = useQuery(api.reviews.reviewables, me ? {} : 'skip');
+  const create = useMutation(api.reviews.create);
+  const remove = useMutation(api.reviews.remove);
 
-  const filtered = useMemo(() => {
-    if (activeFilter === 'all') return MY_REVIEWS;
-    return MY_REVIEWS.filter((r) => r.rating === parseInt(activeFilter));
-  }, [activeFilter]);
+  const [tab, setTab] = useState<'pending' | 'written'>('pending');
+  const [target, setTarget] = useState<Reviewable | null>(null);
+  const [rating, setRating] = useState(0);
+  const [comment, setComment] = useState('');
+  const [saving, setSaving] = useState(false);
 
-  const stats = useMemo(() => {
-    const total = MY_REVIEWS.length;
-    const avg = MY_REVIEWS.reduce((s, r) => s + r.rating, 0) / total;
-    return { total, avg: avg.toFixed(1) };
-  }, []);
+  const submit = async () => {
+    if (!target || rating < 1) {
+      Alert.alert('Add a rating', 'Tap a star to rate this item.');
+      return;
+    }
+    setSaving(true);
+    try {
+      await create({
+        targetType: target.targetType,
+        targetId: target.targetId,
+        rating,
+        comment: comment.trim() || undefined,
+        orderId: target.orderId ? target.orderId as Id<'orders'> : undefined,
+        jobId: target.jobId ? target.jobId as Id<'jobs'> : undefined,
+      });
+      setTarget(null);
+      setRating(0);
+      setComment('');
+      setTab('written');
+      Alert.alert('Review posted', 'Thanks for helping the community.');
+    } catch (err) {
+      Alert.alert('Could not post review', errorMessage(err));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const confirmRemove = (id: string) => {
+    Alert.alert('Delete review?', 'This cannot be undone.', [
+      { text: 'Keep', style: 'cancel' },
+      { text: 'Delete', style: 'destructive', onPress: async () => {
+        try { await remove({ id: id as Id<'reviews'> }); } catch (err) { Alert.alert('Could not delete', errorMessage(err)); }
+      } },
+    ]);
+  };
+
+  if (me === undefined) {
+    return <View style={[styles.container, styles.center]}><ActivityIndicator color={Colors.primary} /></View>;
+  }
+  if (!me) {
+    return (
+      <View style={[styles.container, styles.center]}>
+        <Stack.Screen options={{ headerTitle: 'My Reviews' }} />
+        <Text style={styles.emptyTitle}>Sign in to see your reviews</Text>
+        <TouchableOpacity style={styles.primaryBtn} onPress={() => router.push('/sign-in' as any)}>
+          <Text style={styles.primaryBtnText}>Sign in</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>
       <Stack.Screen options={{ headerTitle: 'My Reviews' }} />
-      <FlatList
-        data={filtered}
-        keyExtractor={(item) => item.id}
-        contentContainerStyle={styles.list}
-        showsVerticalScrollIndicator={false}
-        ListHeaderComponent={
-          <>
-            <View style={styles.statsBar}>
-              <View style={styles.statCard}>
-                <Text style={styles.statNum}>{stats.avg}</Text>
-                <StarRow rating={Math.round(parseFloat(stats.avg))} size={12} />
-                <Text style={styles.statLbl}>Average Rating</Text>
-              </View>
-              <View style={styles.statVr} />
-              <View style={styles.statCard}>
-                <Text style={styles.statNum}>{stats.total}</Text>
-                <MaterialIcons name="rate-review" size={18} color={Colors.primaryGreen} />
-                <Text style={styles.statLbl}>Total Reviews</Text>
-              </View>
-            </View>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterContent}>
-              {FILTERS.map((f) => {
-                const active = activeFilter === f.key;
-                return (
-                  <TouchableOpacity key={f.key} style={[styles.filterChip, active && styles.filterChipActive]} onPress={() => setActiveFilter(f.key)} activeOpacity={0.7}>
-                    <MaterialIcons name={f.icon as any} size={14} color={active ? '#fff' : Colors.textMedium} />
-                    <Text style={[styles.filterChipText, active && styles.filterChipTextActive]}>{f.label}</Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </ScrollView>
-          </>
-        }
-        renderItem={({ item }) => (
-          <TouchableOpacity style={styles.card} activeOpacity={0.8}>
-            <View style={styles.cardLeft}>
-              <Text style={styles.cardEmoji}>{item.emoji}</Text>
-            </View>
-            <View style={styles.cardBody}>
-              <View style={styles.cardTop}>
-                <Text style={styles.cardProduct} numberOfLines={1}>{item.product}</Text>
-                <Text style={styles.cardDate}>{item.date}</Text>
-              </View>
-              <StarRow rating={item.rating} />
-              <Text style={styles.cardText}>{item.text}</Text>
-              <Text style={styles.cardVendor}>{item.vendor}</Text>
-            </View>
+      <View style={styles.tabs}>
+        {(['pending', 'written'] as const).map((t) => (
+          <TouchableOpacity key={t} style={[styles.tab, tab === t && styles.tabActive]} onPress={() => setTab(t)}>
+            <Text style={[styles.tabText, tab === t && styles.tabTextActive]}>
+              {t === 'pending' ? `To review${pending?.length ? ` (${pending.length})` : ''}` : `Written${reviews?.length ? ` (${reviews.length})` : ''}`}
+            </Text>
           </TouchableOpacity>
-        )}
-        ListEmptyComponent={
-          <View style={styles.empty}>
-            <View style={styles.emptyIconWrap}>
-              <MaterialIcons name="star-outline" size={44} color={Colors.border} />
+        ))}
+      </View>
+
+      <ScrollView contentContainerStyle={styles.content}>
+        {tab === 'pending' ? (
+          pending === undefined ? <ActivityIndicator color={Colors.primary} style={{ marginTop: 24 }} /> : pending.length === 0 ? (
+            <Empty
+              icon="star-outline"
+              title="Nothing to review yet"
+              sub="Once an order is delivered or a hired job is completed, you can rate the vendor, product or worker here."
+              action="Browse materials"
+              onPress={() => router.push('/(tabs)' as any)}
+            />
+          ) : pending.map((item) => (
+            <View key={`${item.targetType}:${item.targetId}`} style={styles.card}>
+              {item.imageUrl ? (
+                <Image source={{ uri: item.imageUrl }} style={styles.thumb} />
+              ) : (
+                <View style={[styles.thumb, styles.thumbIcon]}>
+                  <MaterialIcons name={item.targetType === 'worker' ? 'handyman' : item.targetType === 'store' ? 'storefront' : 'inventory-2'} size={24} color={Colors.primary} />
+                </View>
+              )}
+              <View style={styles.flex}>
+                <Text style={styles.name} numberOfLines={1}>{item.targetName}</Text>
+                <Text style={styles.meta}>{labelFor(item.targetType)} · {new Date(item.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</Text>
+                <TouchableOpacity style={styles.reviewBtn} onPress={() => { setTarget(item); setRating(0); setComment(''); }}>
+                  <MaterialIcons name="star" size={15} color={Colors.onPrimary} />
+                  <Text style={styles.reviewBtnText}>Write review</Text>
+                </TouchableOpacity>
+              </View>
             </View>
-            <Text style={styles.emptyTitle}>No reviews found</Text>
-            <Text style={styles.emptySub}>You haven't reviewed any products yet.</Text>
+          ))
+        ) : (
+          reviews === undefined ? <ActivityIndicator color={Colors.primary} style={{ marginTop: 24 }} /> : reviews.length === 0 ? (
+            <Empty icon="rate-review" title="No reviews yet" sub="Reviews you write will appear here." action="See what to review" onPress={() => setTab('pending')} />
+          ) : reviews.map((r) => (
+            <View key={r._id} style={styles.reviewCard}>
+              <View style={styles.reviewHead}>
+                <TouchableOpacity style={styles.flex} onPress={() => r.targetRoute && router.push(r.targetRoute as any)}>
+                  <Text style={styles.name} numberOfLines={1}>{r.targetName}</Text>
+                  <Text style={styles.meta}>{labelFor(r.targetType)}</Text>
+                </TouchableOpacity>
+                <View style={styles.stars}>
+                  {[1, 2, 3, 4, 5].map((n) => <MaterialIcons key={n} name={n <= r.rating ? 'star' : 'star-border'} size={15} color={Colors.amber} />)}
+                </View>
+              </View>
+              {!!r.comment && <Text style={styles.comment}>{r.comment}</Text>}
+              {r.reply && (
+                <View style={styles.reply}>
+                  <Text style={styles.replyLabel}>Vendor reply</Text>
+                  <Text style={styles.replyText}>{r.reply}</Text>
+                </View>
+              )}
+              <View style={styles.reviewFoot}>
+                <Text style={styles.meta}>{new Date(r.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</Text>
+                <TouchableOpacity onPress={() => confirmRemove(r._id)} hitSlop={8}>
+                  <Text style={styles.delete}>Delete</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          ))
+        )}
+      </ScrollView>
+
+      <Modal visible={!!target} transparent animationType="slide" onRequestClose={() => setTarget(null)}>
+        <View style={styles.modalWrap}>
+          <View style={styles.sheet}>
+            <View style={styles.sheetHead}>
+              <Text style={styles.sheetTitle}>Rate {labelFor(target?.targetType)}</Text>
+              <TouchableOpacity onPress={() => setTarget(null)} hitSlop={8}><MaterialIcons name="close" size={22} color={Colors.outline} /></TouchableOpacity>
+            </View>
+            <Text style={styles.targetName}>{target?.targetName}</Text>
+            <View style={styles.starPicker}>
+              {[1, 2, 3, 4, 5].map((n) => (
+                <TouchableOpacity key={n} onPress={() => setRating(n)} hitSlop={6}>
+                  <MaterialIcons name={n <= rating ? 'star' : 'star-border'} size={38} color={Colors.amber} />
+                </TouchableOpacity>
+              ))}
+            </View>
+            <TextInput
+              style={styles.input}
+              placeholder="Share details about quality, timeliness or service (optional)"
+              placeholderTextColor={Colors.outline}
+              value={comment}
+              onChangeText={setComment}
+              multiline
+            />
+            <TouchableOpacity style={[styles.primaryBtn, saving && styles.disabled]} onPress={submit} disabled={saving}>
+              {saving ? <ActivityIndicator color={Colors.onPrimary} /> : <Text style={styles.primaryBtnText}>Post review</Text>}
+            </TouchableOpacity>
           </View>
-        }
-      />
+        </View>
+      </Modal>
+    </View>
+  );
+}
+
+function labelFor(type?: string) {
+  return type === 'worker' ? 'worker' : type === 'store' ? 'vendor' : 'product';
+}
+
+function Empty({ icon, title, sub, action, onPress }: { icon: string; title: string; sub: string; action: string; onPress: () => void }) {
+  return (
+    <View style={styles.empty}>
+      <View style={styles.emptyIconWrap}><MaterialIcons name={icon as any} size={36} color={Colors.primary} /></View>
+      <Text style={styles.emptyTitle}>{title}</Text>
+      <Text style={styles.emptySub}>{sub}</Text>
+      <TouchableOpacity style={styles.primaryBtn} onPress={onPress}><Text style={styles.primaryBtnText}>{action}</Text></TouchableOpacity>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
-  list: { padding: 20, paddingBottom: 32 },
-
-  statsBar: {
-    flexDirection: 'row',
-    backgroundColor: Colors.card,
-    borderRadius: 14,
-    padding: 16,
-    marginBottom: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.04,
-    shadowRadius: 4,
-    elevation: 2,
-    alignItems: 'center',
-  },
-  statCard: {
-    flex: 1,
-    alignItems: 'center',
-    gap: 4,
-  },
-  statNum: {
-    fontSize: 22,
-    fontWeight: '800',
-    color: Colors.textDark,
-  },
-  statLbl: {
-    fontSize: 10,
-    fontWeight: '600',
-    color: Colors.textLight,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  statVr: {
-    width: 1,
-    height: 36,
-    backgroundColor: Colors.outlineVariant,
-  },
-
-  filterContent: {
-    gap: 8,
-    paddingBottom: 4,
-  },
-  filterChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 99,
-    backgroundColor: Colors.card,
-    borderWidth: 1,
-    borderColor: Colors.outlineVariant,
-  },
-  filterChipActive: {
-    backgroundColor: Colors.amber,
-    borderColor: Colors.amber,
-  },
-  filterChipText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: Colors.textMedium,
-  },
-  filterChipTextActive: {
-    color: '#fff',
-  },
-
-  card: {
-    flexDirection: 'row',
-    backgroundColor: Colors.card,
-    borderRadius: 14,
-    padding: 14,
-    marginBottom: 12,
-    gap: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.04,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  cardLeft: {
-    width: 48,
-    height: 48,
-    borderRadius: 12,
-    backgroundColor: Colors.surface,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  cardEmoji: { fontSize: 24 },
-  cardBody: { flex: 1, gap: 4 },
-  cardTop: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  cardProduct: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: Colors.textDark,
-    flex: 1,
-    marginRight: 8,
-  },
-  cardDate: {
-    fontSize: 10,
-    color: Colors.textMuted,
-  },
-  cardText: {
-    fontSize: 12,
-    color: Colors.textMedium,
-    lineHeight: 18,
-  },
-  cardVendor: {
-    fontSize: 11,
-    color: Colors.textLight,
-    fontWeight: '500',
-  },
-
-  empty: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingTop: 60,
-    gap: 8,
-  },
-  emptyIconWrap: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
-    backgroundColor: Colors.surface,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 4,
-  },
-  emptyTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: Colors.textDark,
-  },
-  emptySub: {
-    fontSize: 13,
-    color: Colors.textLight,
-    textAlign: 'center',
-    paddingHorizontal: 40,
-  },
+  center: { alignItems: 'center', justifyContent: 'center', padding: 24, gap: 12 },
+  flex: { flex: 1 },
+  tabs: { flexDirection: 'row', margin: 16, marginBottom: 4, padding: 4, borderRadius: 999, backgroundColor: Colors.surfaceVariant },
+  tab: { flex: 1, height: 40, borderRadius: 999, alignItems: 'center', justifyContent: 'center' },
+  tabActive: { backgroundColor: Colors.card, elevation: 2 },
+  tabText: { fontSize: 13, fontWeight: '600', color: Colors.onSurfaceVariant },
+  tabTextActive: { color: Colors.primary },
+  content: { padding: 16, paddingBottom: 40 },
+  card: { flexDirection: 'row', gap: 12, padding: 14, borderRadius: 14, backgroundColor: Colors.card, borderWidth: 1, borderColor: Colors.outlineVariant, marginBottom: 10 },
+  thumb: { width: 54, height: 54, borderRadius: 10, backgroundColor: Colors.surfaceVariant },
+  thumbIcon: { alignItems: 'center', justifyContent: 'center' },
+  name: { fontSize: 15, fontWeight: '700', color: Colors.onSurface },
+  meta: { fontSize: 11, color: Colors.outline, marginTop: 2 },
+  reviewBtn: { flexDirection: 'row', alignItems: 'center', gap: 5, alignSelf: 'flex-start', marginTop: 8, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 999, backgroundColor: Colors.primary },
+  reviewBtnText: { fontSize: 11, fontWeight: '700', color: Colors.onPrimary },
+  reviewCard: { padding: 14, borderRadius: 14, backgroundColor: Colors.card, borderWidth: 1, borderColor: Colors.outlineVariant, marginBottom: 10 },
+  reviewHead: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  stars: { flexDirection: 'row', gap: 1 },
+  comment: { fontSize: 13, color: Colors.onSurfaceVariant, lineHeight: 19, marginTop: 8 },
+  reply: { marginTop: 10, padding: 10, borderRadius: 8, backgroundColor: Colors.surfaceVariant + '80' },
+  replyLabel: { fontSize: 10, fontWeight: '700', color: Colors.primary, textTransform: 'uppercase', letterSpacing: 0.4 },
+  replyText: { fontSize: 12, color: Colors.onSurfaceVariant, marginTop: 3, lineHeight: 17 },
+  reviewFoot: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 10 },
+  delete: { fontSize: 11, fontWeight: '700', color: Colors.error },
+  empty: { alignItems: 'center', paddingTop: 40, gap: 8 },
+  emptyIconWrap: { width: 72, height: 72, borderRadius: 36, backgroundColor: Colors.amberLight + '80', alignItems: 'center', justifyContent: 'center', marginBottom: 2 },
+  emptyTitle: { fontSize: 18, fontWeight: '700', color: Colors.onSurface, textAlign: 'center' },
+  emptySub: { fontSize: 13, color: Colors.outline, textAlign: 'center', lineHeight: 20 },
+  primaryBtn: { minHeight: 44, paddingHorizontal: 24, borderRadius: 999, backgroundColor: Colors.primary, alignItems: 'center', justifyContent: 'center', marginTop: 8 },
+  primaryBtnText: { fontSize: 14, fontWeight: '700', color: Colors.onPrimary },
+  disabled: { opacity: 0.6 },
+  modalWrap: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.35)' },
+  sheet: { backgroundColor: Colors.background, borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, paddingBottom: 32 },
+  sheetHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  sheetTitle: { fontSize: 18, fontWeight: '800', color: Colors.onSurface },
+  targetName: { fontSize: 14, fontWeight: '600', color: Colors.onSurfaceVariant, marginTop: 4 },
+  starPicker: { flexDirection: 'row', justifyContent: 'center', gap: 10, marginVertical: 16 },
+  input: { minHeight: 96, borderRadius: 10, borderWidth: 1, borderColor: Colors.outlineVariant, backgroundColor: Colors.card, padding: 12, color: Colors.onSurface, fontSize: 14, textAlignVertical: 'top' },
 });

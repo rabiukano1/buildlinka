@@ -13,8 +13,8 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors } from '../constants/Colors';
-import { useNotifications } from '../contexts/NotificationContext';
-import type { NotificationItem } from '../constants/MockData';
+import { useNotifications, type NotificationItem } from '../contexts/NotificationContext';
+import { goBackOrHome } from '../lib/backend';
 
 const NOTIF_ICONS: Record<string, { bg: string; icon: string; color: string }> = {
   order: { bg: '#0d631b15', icon: 'local-shipping', color: '#0d631b' },
@@ -90,7 +90,7 @@ export default function NotificationsScreen() {
         end={{ x: 1.2, y: 1.2 }}
       >
         <View style={styles.headerRow}>
-          <TouchableOpacity style={styles.backBtn} onPress={() => router.back()} activeOpacity={0.7}>
+          <TouchableOpacity style={styles.backBtn} onPress={() => goBackOrHome()} activeOpacity={0.7}>
             <MaterialIcons name="arrow-back" size={20} color="#fff" />
           </TouchableOpacity>
           <View style={styles.headerTitleArea}>
